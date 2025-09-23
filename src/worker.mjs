@@ -18,7 +18,9 @@ export default {
           .map(s => s.trim())
           .filter(Boolean);
         if (keys.length) {
-          apiKey = keys[Math.floor(Math.random() * keys.length)];
+          const index = Math.floor(Math.random() * keys.length)
+          apiKey = keys[index];
+          console.log(`API KEY ${index}: ${apiKey}`);
         }
       }
       const assert = (success) => {
