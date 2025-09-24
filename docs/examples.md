@@ -23,6 +23,7 @@ curl -X POST https://apikeys.xnscu.com/v1/chat/completions \
 ```bash
 curl -X POST http://localhost:8787/v1/chat/completions \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer XXX" \
   -d '{
     "model": "gemini-2.0-flash-exp",
     "messages": [
