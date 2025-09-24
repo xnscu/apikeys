@@ -19,7 +19,7 @@ export default {
       const { pathname } = new URL(request.url);
 
       // 管理端点路由
-      if (pathname.startsWith("/admin/")) {
+      if (pathname === "/admin" || pathname.startsWith("/admin/")) {
         return handleAdminEndpoints(request, poolManager, pathname);
       }
 
