@@ -12,5 +12,6 @@
     "dev:deno": "deno --watch --allow-env --allow-net deno.mjs",
     "start:bun": "bun bun.mjs",
     "dev:bun": "bun --watch bun.mjs"
-  },"name": "apikeys"
+  },
+  "name": "apikeys"
 }
