@@ -64,9 +64,8 @@ if wrangler deploy; then
     echo "🎉 部署完成!"
     echo ""
     echo "📋 接下来的步骤:"
-    echo "1. 访问你的Worker URL + '/admin' 打开管理面板"
-    echo "2. 添加你的Gemini API Keys"
-    echo "3. 开始使用连接池API!"
+    echo "1. 通过数据库直接添加你的Gemini API Keys"
+    echo "2. 开始使用连接池API!"
     echo ""
     echo "📖 更多信息请查看 README.md"
 else

@@ -37,69 +37,6 @@ curl -X POST https://apikeys.xnscu.com/v1/embeddings \
 curl https://apikeys.xnscu.com/v1/models
 ```
 
-## 管理API调用
-
-### 1. 添加API Key
-
-```bash
-curl -X POST https://apikeys.xnscu.com/admin/keys \
-  -H "Content-Type: application/json" \
-  -d '{
-    "api_key": "your-gemini-api-key",
-    "gmail_email": "your-email@gmail.com",
-    "notes": "主要用于聊天功能"
-  }'
-```
-
-### 2. 获取所有API Keys
-
-```bash
-curl https://apikeys.xnscu.com/admin/keys
-```
-
-### 3. 启用/禁用API Key
-
-```bash
-curl -X POST https://apikeys.xnscu.com/admin/keys/1/toggle \
-  -H "Content-Type: application/json" \
-  -d '{
-    "is_active": false
-  }'
-```
-
-### 4. 删除API Key
-
-```bash
-curl -X DELETE https://apikeys.xnscu.com/admin/keys/1
-```
-
-### 5. 获取使用统计
-
-```bash
-# 获取7天内的统计
-curl https://apikeys.xnscu.com/admin/stats?days=7
-
-# 获取30天内的统计
-curl https://apikeys.xnscu.com/admin/stats?days=30
-```
-
-### 6. 获取配置
-
-```bash
-curl https://apikeys.xnscu.com/admin/config
-```
-
-### 7. 更新配置
-
-```bash
-curl -X POST https://apikeys.xnscu.com/admin/config \
-  -H "Content-Type: application/json" \
-  -d '{
-    "key": "rotation_strategy",
-    "value": "least_used",
-    "description": "使用最少使用策略"
-  }'
-```
 
 ## JavaScript/Node.js 示例
 
@@ -211,52 +148,6 @@ result = chat_completion("你好，请介绍一下自己", worker_url)
 print(result['choices'][0]['message']['content'])
 ```
 
-### 管理API Keys
-
-```python
-class ApiKeyManager:
-    def __init__(self, worker_url):
-        self.worker_url = worker_url
-
-    def add_api_key(self, api_key, gmail_email, notes=""):
-        """添加API Key"""
-        url = f"{self.worker_url}/admin/keys"
-        payload = {
-            "api_key": api_key,
-            "gmail_email": gmail_email,
-            "notes": notes
-        }
-        response = requests.post(url, json=payload)
-        return response.json()
-
-    def get_api_keys(self):
-        """获取所有API Keys"""
-        url = f"{self.worker_url}/admin/keys"
-        response = requests.get(url)
-        return response.json()
-
-    def get_stats(self, days=7):
-        """获取使用统计"""
-        url = f"{self.worker_url}/admin/stats?days={days}"
-        response = requests.get(url)
-        return response.json()
-
-# 使用示例
-manager = ApiKeyManager("https://apikeys.xnscu.com")
-
-# 添加API Key
-result = manager.add_api_key(
-    api_key="your-gemini-api-key",
-    gmail_email="your-email@gmail.com",
-    notes="测试用API Key"
-)
-print(result)
-
-# 查看统计
-stats = manager.get_stats(7)
-for stat in stats['data']:
-    print(f"邮箱: {stat['gmail_email']}, 请求数: {stat['request_count']}")
-```
 
 ## OpenAI SDK 兼容
 

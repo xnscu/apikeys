@@ -7,8 +7,6 @@
 - 🔄 **循环获取API Keys**: 支持round-robin、最少使用、随机三种轮询策略
 - 📊 **使用统计**: 详细记录每个API key的使用情况和错误次数
 - 🛡️ **错误处理**: 自动禁用错误过多的API keys，支持错误计数重置
-- 🎛️ **管理界面**: 提供Web管理面板，方便添加、删除、查看API keys
-- 📈 **监控面板**: 实时查看使用统计和性能指标
 - 🔧 **配置管理**: 支持动态配置连接池参数
 
 ## 🚀 部署步骤
@@ -82,15 +80,6 @@ wrangler deploy
 
 ## 📖 使用指南
 
-### 管理API Keys
-
-访问 `https://你的worker域名/admin` 打开管理面板，可以：
-
-- ✅ 添加新的API Keys
-- 🔍 查看所有API Keys状态
-- ⚡ 启用/禁用特定的API Keys
-- 📊 查看使用统计
-- 🗑️ 删除不需要的API Keys
 
 ### API端点
 
@@ -100,16 +89,6 @@ wrangler deploy
 - `POST /v1/embeddings` - 文本嵌入
 - `GET /v1/models` - 模型列表
 
-### 管理端点
-
-- `GET /admin` - 管理面板首页
-- `GET /admin/keys` - 获取所有API Keys
-- `POST /admin/keys` - 添加新的API Key
-- `DELETE /admin/keys/{id}` - 删除指定API Key
-- `POST /admin/keys/{id}/toggle` - 启用/禁用API Key
-- `GET /admin/stats?days=7` - 获取使用统计
-- `GET /admin/config` - 获取配置
-- `POST /admin/config` - 更新配置
 
 ## 🔧 配置参数
 
