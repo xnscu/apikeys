@@ -828,6 +828,22 @@ async function handleAdminEndpoints(request, poolManager, pathname) {
           status: 201
         }));
 
+      // 批量添加API Keys
+      case pathname === "/admin/keys/batch" && method === "POST":
+        const { api_keys } = await request.json();
+        if (!api_keys || !Array.isArray(api_keys) || api_keys.length === 0) {
+          throw new HttpError("api_keys 必须是非空数组", 400);
+        }
+        const batchResult = await poolManager.addApiKeysBatch(api_keys);
+        return new Response(JSON.stringify({
+          success: true,
+          message: `批量添加完成: 成功${batchResult.success.length}个, 失败${batchResult.errors.length}个`,
+          data: batchResult
+        }, null, 2), fixCors({
+          headers: { "Content-Type": "application/json" },
+          status: 201
+        }));
+
       // 删除API Key
       case pathname.startsWith("/admin/keys/") && method === "DELETE":
         const keyId2 = parseInt(pathname.split("/").pop());
@@ -901,10 +917,23 @@ async function handleAdminEndpoints(request, poolManager, pathname) {
 
       // 管理面板首页
       case pathname === "/admin" && method === "GET":
-        return new Response(getAdminHTML(), fixCors({
-          headers: { "Content-Type": "text/html" },
-          status: 200
-        }));
+        try {
+          const htmlContent = await getAdminHTML();
+          return new Response(htmlContent, fixCors({
+            headers: { "Content-Type": "text/html" },
+            status: 200
+          }));
+        } catch (error) {
+          console.error("读取管理页面失败:", error);
+          return new Response("管理页面加载失败", fixCors({
+            headers: { "Content-Type": "text/plain" },
+            status: 500
+          }));
+        }
+
+      // 静态文件服务
+      case pathname.startsWith("/public/") && method === "GET":
+        return handleStaticFile(pathname);
 
       default:
         throw new HttpError("管理端点不存在", 404);
@@ -922,250 +951,73 @@ async function handleAdminEndpoints(request, poolManager, pathname) {
 }
 
 /**
+ * 处理静态文件请求
+ */
+async function handleStaticFile(pathname) {
+  try {
+    // 从文件系统读取静态文件（在不同环境中实现方式不同）
+    // 这里提供一个基础实现框架
+
+    const filePath = pathname.replace('/public/', '');
+
+    if (filePath === 'admin.html') {
+      // 读取admin.html文件
+      const fs = await import('fs/promises');
+      const path = await import('path');
+      const htmlPath = path.join(process.cwd(), 'public', 'admin.html');
+
+      try {
+        const content = await fs.readFile(htmlPath, 'utf-8');
+        return new Response(content, fixCors({
+          headers: { "Content-Type": "text/html" },
+          status: 200
+        }));
+      } catch (fileError) {
+        console.error('读取admin.html失败:', fileError);
+        return new Response('File not found', fixCors({ status: 404 }));
+      }
+    }
+
+    return new Response('File not found', fixCors({ status: 404 }));
+  } catch (error) {
+    console.error('静态文件服务错误:', error);
+    return new Response('Internal Server Error', fixCors({ status: 500 }));
+  }
+}
+
+/**
  * 获取管理面板HTML
  */
-function getAdminHTML() {
-  return `<!DOCTYPE html>
+async function getAdminHTML() {
+  try {
+    // 优先尝试读取外部HTML文件
+    const staticResponse = await handleStaticFile('/public/admin.html');
+    if (staticResponse.status === 200) {
+      return await staticResponse.text();
+    }
+
+    // 如果无法读取外部文件，返回简化的内联HTML
+    return `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Gemini API Keys 连接池管理</title>
+    <title>Gemini API Keys 管理</title>
     <style>
-        body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background: #f5f5f5; }
-        .container { max-width: 1200px; margin: 0 auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-        h1 { color: #333; text-align: center; margin-bottom: 30px; }
-        .section { margin-bottom: 30px; }
-        .section h2 { color: #555; border-bottom: 2px solid #007bff; padding-bottom: 10px; }
-        .form-group { margin-bottom: 15px; }
-        label { display: block; margin-bottom: 5px; font-weight: bold; }
-        input, textarea, select { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }
-        button { background: #007bff; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; }
-        button:hover { background: #0056b3; }
-        .btn-danger { background: #dc3545; }
-        .btn-danger:hover { background: #c82333; }
-        .btn-success { background: #28a745; }
-        .btn-success:hover { background: #218838; }
-        table { width: 100%; border-collapse: collapse; margin-top: 15px; }
-        th, td { padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }
-        th { background-color: #f8f9fa; font-weight: bold; }
-        .status-active { color: #28a745; font-weight: bold; }
-        .status-inactive { color: #dc3545; font-weight: bold; }
-        .api-key { font-family: monospace; background: #f8f9fa; padding: 2px 6px; border-radius: 3px; }
-        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; margin-top: 20px; }
-        .stat-card { background: #f8f9fa; padding: 20px; border-radius: 6px; text-align: center; }
-        .stat-number { font-size: 2em; font-weight: bold; color: #007bff; }
-        .message { padding: 10px; border-radius: 4px; margin: 10px 0; }
-        .message.success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
-        .message.error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .error { color: red; padding: 20px; border: 1px solid red; background: #ffebee; }
     </style>
 </head>
 <body>
-    <div class="container">
-        <h1>🔑 Gemini API Keys 连接池管理</h1>
-
-        <div id="message"></div>
-
-        <div class="section">
-            <h2>添加新的 API Key</h2>
-            <div class="form-group">
-                <label for="apiKey">API Key:</label>
-                <input type="text" id="apiKey" placeholder="输入Gemini API Key">
-            </div>
-            <div class="form-group">
-                <label for="gmailEmail">Gmail邮箱:</label>
-                <input type="email" id="gmailEmail" placeholder="输入对应的Gmail邮箱">
-            </div>
-            <div class="form-group">
-                <label for="notes">备注:</label>
-                <textarea id="notes" placeholder="可选的备注信息"></textarea>
-            </div>
-            <button onclick="addApiKey()">添加 API Key</button>
-        </div>
-
-        <div class="section">
-            <h2>API Keys 列表</h2>
-            <button onclick="loadApiKeys()">刷新列表</button>
-            <div id="apiKeysTable"></div>
-        </div>
-
-        <div class="section">
-            <h2>使用统计</h2>
-            <label for="statsDays">统计天数:</label>
-            <select id="statsDays" onchange="loadStats()">
-                <option value="1">1天</option>
-                <option value="7" selected>7天</option>
-                <option value="30">30天</option>
-            </select>
-            <div id="statsContainer"></div>
-        </div>
+    <div class="error">
+        <h2>管理页面加载错误</h2>
+        <p>无法加载完整的管理页面。请确保 admin.html 文件存在于正确位置。</p>
+        <p>请访问 <a href="/public/admin.html">/public/admin.html</a> 或联系管理员。</p>
     </div>
-
-    <script>
-        function showMessage(message, type = 'success') {
-            const messageDiv = document.getElementById('message');
-            messageDiv.innerHTML = \`<div class="message \${type}">\${message}</div>\`;
-            setTimeout(() => messageDiv.innerHTML = '', 5000);
-        }
-
-        async function addApiKey() {
-            const apiKey = document.getElementById('apiKey').value;
-            const gmailEmail = document.getElementById('gmailEmail').value;
-            const notes = document.getElementById('notes').value;
-
-            if (!apiKey || !gmailEmail) {
-                showMessage('请填写API Key和Gmail邮箱', 'error');
-                return;
-            }
-
-            try {
-                const response = await fetch('/admin/keys', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ api_key: apiKey, gmail_email: gmailEmail, notes })
-                });
-
-                const result = await response.json();
-                if (result.success) {
-                    showMessage('API Key添加成功');
-                    document.getElementById('apiKey').value = '';
-                    document.getElementById('gmailEmail').value = '';
-                    document.getElementById('notes').value = '';
-                    loadApiKeys();
-                } else {
-                    showMessage(result.error || '添加失败', 'error');
-                }
-            } catch (error) {
-                showMessage('网络错误: ' + error.message, 'error');
-            }
-        }
-
-        async function loadApiKeys() {
-            try {
-                const response = await fetch('/admin/keys');
-                const result = await response.json();
-
-                if (result.success) {
-                    const table = \`
-                        <table>
-                            <thead>
-                                <tr>
-                                    <th>ID</th>
-                                    <th>API Key</th>
-                                    <th>Gmail邮箱</th>
-                                    <th>状态</th>
-                                    <th>总请求数</th>
-                                    <th>错误次数</th>
-                                    <th>最后使用</th>
-                                    <th>操作</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                \${result.data.map(key => \`
-                                    <tr>
-                                        <td>\${key.id}</td>
-                                        <td><span class="api-key">\${key.api_key}</span></td>
-                                        <td>\${key.gmail_email}</td>
-                                        <td class="\${key.is_active ? 'status-active' : 'status-inactive'}">
-                                            \${key.is_active ? '启用' : '禁用'}
-                                        </td>
-                                        <td>\${key.total_requests}</td>
-                                        <td>\${key.error_count}</td>
-                                        <td>\${key.last_used_at || '从未使用'}</td>
-                                        <td>
-                                            <button class="\${key.is_active ? 'btn-danger' : 'btn-success'}"
-                                                    onclick="toggleApiKey(\${key.id}, \${!key.is_active})">
-                                                \${key.is_active ? '禁用' : '启用'}
-                                            </button>
-                                            <button class="btn-danger" onclick="deleteApiKey(\${key.id})">删除</button>
-                                        </td>
-                                    </tr>
-                                \`).join('')}
-                            </tbody>
-                        </table>
-                    \`;
-                    document.getElementById('apiKeysTable').innerHTML = table;
-                } else {
-                    showMessage(result.error || '加载失败', 'error');
-                }
-            } catch (error) {
-                showMessage('网络错误: ' + error.message, 'error');
-            }
-        }
-
-        async function toggleApiKey(id, isActive) {
-            try {
-                const response = await fetch(\`/admin/keys/\${id}/toggle\`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ is_active: isActive })
-                });
-
-                const result = await response.json();
-                if (result.success) {
-                    showMessage(result.message);
-                    loadApiKeys();
-                } else {
-                    showMessage(result.error || '操作失败', 'error');
-                }
-            } catch (error) {
-                showMessage('网络错误: ' + error.message, 'error');
-            }
-        }
-
-        async function deleteApiKey(id) {
-            if (!confirm('确定要删除这个API Key吗？')) return;
-
-            try {
-                const response = await fetch(\`/admin/keys/\${id}\`, { method: 'DELETE' });
-                const result = await response.json();
-
-                if (result.success) {
-                    showMessage('API Key删除成功');
-                    loadApiKeys();
-                } else {
-                    showMessage(result.error || '删除失败', 'error');
-                }
-            } catch (error) {
-                showMessage('网络错误: ' + error.message, 'error');
-            }
-        }
-
-        async function loadStats() {
-            const days = document.getElementById('statsDays').value;
-
-            try {
-                const response = await fetch(\`/admin/stats?days=\${days}\`);
-                const result = await response.json();
-
-                if (result.success) {
-                    const statsHtml = \`
-                        <div class="stats-grid">
-                            \${result.data.map(stat => \`
-                                <div class="stat-card">
-                                    <div class="stat-number">\${stat.request_count || 0}</div>
-                                    <div>\${stat.gmail_email}</div>
-                                    <div>平均Token: \${Math.round(stat.avg_tokens || 0)}</div>
-                                    <div>错误: \${stat.error_count || 0}</div>
-                                </div>
-                            \`).join('')}
-                        </div>
-                    \`;
-                    document.getElementById('statsContainer').innerHTML = statsHtml;
-                } else {
-                    showMessage(result.error || '加载统计失败', 'error');
-                }
-            } catch (error) {
-                showMessage('网络错误: ' + error.message, 'error');
-            }
-        }
-
-        // 页面加载时初始化数据
-        window.onload = function() {
-            loadApiKeys();
-            loadStats();
-        };
-    </script>
 </body>
 </html>`;
+  } catch (error) {
+    console.error('读取管理页面HTML失败:', error);
+    throw error;
+  }
 }

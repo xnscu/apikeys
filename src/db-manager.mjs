@@ -30,6 +30,107 @@ export class ApiKeyPoolManager {
   }
 
   /**
+   * 批量添加API Keys
+   */
+  async addApiKeysBatch(apiKeys) {
+    const results = {
+      success: [],
+      errors: [],
+      total: apiKeys.length
+    };
+
+    // 预处理和验证数据
+    const validKeys = [];
+    for (let i = 0; i < apiKeys.length; i++) {
+      const { api_key, gmail_email, notes = '' } = apiKeys[i];
+
+      // 验证必填字段
+      if (!api_key || !gmail_email) {
+        results.errors.push({
+          index: i + 1,
+          data: apiKeys[i],
+          error: 'API Key和Gmail邮箱不能为空'
+        });
+        continue;
+      }
+
+      // 验证邮箱格式
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(gmail_email)) {
+        results.errors.push({
+          index: i + 1,
+          data: apiKeys[i],
+          error: '邮箱格式不正确'
+        });
+        continue;
+      }
+
+      validKeys.push({
+        index: i + 1,
+        api_key,
+        gmail_email,
+        notes,
+        originalData: apiKeys[i]
+      });
+    }
+
+    // 如果有有效数据，执行批量插入
+    if (validKeys.length > 0) {
+      try {
+        // 构建批量插入SQL
+        const placeholders = validKeys.map(() => '(?, ?, ?)').join(', ');
+        const values = validKeys.flatMap(key => [key.api_key, key.gmail_email, key.notes]);
+
+        const sql = `
+          INSERT INTO api_keys (api_key, gmail_email, notes)
+          VALUES ${placeholders}
+        `;
+
+        const result = await this.db.prepare(sql).bind(...values).run();
+
+        // 记录成功的插入
+        validKeys.forEach((key, idx) => {
+          results.success.push({
+            index: key.index,
+            id: result.meta.last_row_id - validKeys.length + idx + 1, // 估算ID
+            api_key: key.api_key.substring(0, 10) + '...',
+            gmail_email: key.gmail_email,
+            notes: key.notes
+          });
+        });
+
+        console.log(`批量插入成功: ${validKeys.length}条记录`);
+
+      } catch (error) {
+        // 如果批量插入失败，可能是因为重复键等问题，回退到逐个插入
+        console.log('批量插入失败，回退到逐个插入:', error.message);
+
+        for (const key of validKeys) {
+          try {
+            const keyId = await this.addApiKey(key.api_key, key.gmail_email, key.notes);
+            results.success.push({
+              index: key.index,
+              id: keyId,
+              api_key: key.api_key.substring(0, 10) + '...',
+              gmail_email: key.gmail_email,
+              notes: key.notes
+            });
+          } catch (singleError) {
+            results.errors.push({
+              index: key.index,
+              data: key.originalData,
+              error: singleError.message
+            });
+          }
+        }
+      }
+    }
+
+    console.log(`批量添加API Keys完成: 成功${results.success.length}个, 失败${results.errors.length}个`);
+    return results;
+  }
+
+  /**
    * 获取下一个可用的API Key（循环获取）
    */
   async getNextApiKey(strategy = 'round_robin') {
@@ -168,12 +269,15 @@ export class ApiKeyPoolManager {
    * 获取所有API Keys
    */
   async getAllApiKeys() {
-    return await this.db.prepare(`
+    const result = await this.db.prepare(`
       SELECT id, api_key, gmail_email, is_active, created_at, last_used_at,
              total_requests, error_count, notes
       FROM api_keys
       ORDER BY created_at DESC
     `).all();
+
+    // 确保返回数组，即使查询结果为空
+    return result?.results || [];
   }
 
   /**
