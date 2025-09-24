@@ -44,7 +44,7 @@ export default {
     }
 
     // 使用懒加载的数据库连接池管理器
-    const poolManager = new LazyApiKeyPoolManager(env.LOG);
+    const poolManager = new LazyApiKeyPoolManager(env.DB);
 
     const errHandler = (err) => {
       console.error(err);
@@ -73,7 +73,7 @@ export default {
           apiKey = selectedKeyInfo.api_key;
           console.log(`使用连接池API Key: ${selectedKeyInfo.gmail_email}`);
         } catch (error) {
-          console.error("获取API Key失败:", error.message);
+          console.error("获取API Key失败:", error);
           // 如果数据库连接池没有可用的key，回退到环境变量
           if (env?.GEMINI_API_KEYS) {
             const keys = String(env.GEMINI_API_KEYS)
@@ -338,6 +338,7 @@ async function handleCompletions (req, apiKey, selectedKeyInfo = null, poolManag
           flush: toOpenAiStreamFlush,
           streamIncludeUsage: req.stream_options?.include_usage,
           model, id, last: [],
+          selectedKeyInfo,
           shared,
         }))
         .pipeThrough(new TextEncoderStream());
@@ -352,7 +353,7 @@ async function handleCompletions (req, apiKey, selectedKeyInfo = null, poolManag
         console.error("Error parsing response:", err);
         return new Response(body, fixCors(response)); // output as is
       }
-      body = processCompletionsResponse(body, model, id);
+      body = processCompletionsResponse(body, model, id, selectedKeyInfo);
     }
   }
   return new Response(body, fixCors(response));
@@ -725,7 +726,7 @@ const checkPromptBlock = (choices, promptFeedback, key) => {
   return true;
 };
 
-const processCompletionsResponse = (data, model, id) => {
+const processCompletionsResponse = (data, model, id, selectedKeyInfo = null) => {
   const obj = {
     id,
     choices: data.candidates.map(transformCandidatesMessage),
@@ -735,6 +736,12 @@ const processCompletionsResponse = (data, model, id) => {
     object: "chat.completion",
     usage: data.usageMetadata && transformUsage(data.usageMetadata),
   };
+
+  // 当使用连接池的key时，添加api_user字段
+  if (selectedKeyInfo && selectedKeyInfo.gmail_email) {
+    obj.api_user = selectedKeyInfo.gmail_email;
+  }
+
   if (obj.choices.length === 0 ) {
     checkPromptBlock(obj.choices, data.promptFeedback, "message");
   }
@@ -786,6 +793,11 @@ function toOpenAiStream (line, controller) {
     object: "chat.completion.chunk",
     usage: data.usageMetadata && this.streamIncludeUsage ? null : undefined,
   };
+
+  // 当使用连接池的key时，添加api_user字段
+  if (this.selectedKeyInfo && this.selectedKeyInfo.gmail_email) {
+    obj.api_user = this.selectedKeyInfo.gmail_email;
+  }
   if (checkPromptBlock(obj.choices, data.promptFeedback, "delta")) {
     controller.enqueue(sseline(obj));
     return;
@@ -796,10 +808,15 @@ function toOpenAiStream (line, controller) {
   const finish_reason = cand.finish_reason;
   cand.finish_reason = null;
   if (!this.last[cand.index]) { // first
-    controller.enqueue(sseline({
+    const firstChunk = {
       ...obj,
       choices: [{ ...cand, tool_calls: undefined, delta: { role: "assistant", content: "" } }],
-    }));
+    };
+    // 确保第一个chunk也包含api_user字段
+    if (this.selectedKeyInfo && this.selectedKeyInfo.gmail_email) {
+      firstChunk.api_user = this.selectedKeyInfo.gmail_email;
+    }
+    controller.enqueue(sseline(firstChunk));
   }
   delete cand.delta.role;
   if ("content" in cand.delta) { // prevent empty data (e.g. when MAX_TOKENS)

@@ -19,6 +19,22 @@ curl -X POST https://apikeys.xnscu.com/v1/chat/completions \
     "temperature": 0.7
   }'
 ```
+本地版本
+```bash
+curl -X POST http://localhost:8787/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gemini-2.0-flash-exp",
+    "messages": [
+      {
+        "role": "user",
+        "content": "你好，请介绍一下自己"
+      }
+    ],
+    "max_tokens": 1000,
+    "temperature": 0.7
+  }'
+```
 
 ### 2. 文本嵌入 (Embeddings)
 

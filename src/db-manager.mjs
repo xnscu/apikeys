@@ -19,13 +19,15 @@ export class ApiKeyPoolManager {
     await this.resetExpiredErrors();
 
     // 获取所有可用的API Keys
-    const activeKeys = await this.db.prepare(`
+    const queryResult = await this.db.prepare(`
       SELECT * FROM api_keys
       WHERE is_active = 1 AND error_count < (
         SELECT CAST(value AS INTEGER) FROM pool_config WHERE key = 'max_errors_threshold'
       )
       ORDER BY id
     `).all();
+
+    const activeKeys = queryResult.results || [];
 
     if (activeKeys.length === 0) {
       throw new Error('没有可用的API Keys');
@@ -45,6 +47,10 @@ export class ApiKeyPoolManager {
         break;
       default:
         selectedKey = this.selectRoundRobin(activeKeys);
+    }
+
+    if (!selectedKey || !selectedKey.id) {
+      throw new Error(`选择的API Key无效: ${JSON.stringify(selectedKey)}`);
     }
 
     // 更新最后使用时间和使用次数

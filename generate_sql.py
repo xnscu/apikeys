@@ -22,7 +22,6 @@ class APIKeySQLGenerator:
     def __init__(self, input_file='apikeys.txt', database_name='apikeys-pool'):
         self.input_file = input_file
         self.database_name = database_name
-        self.timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         self.migrations_dir = 'migrations'
 
         # 确保migrations目录存在
@@ -63,9 +62,10 @@ class APIKeySQLGenerator:
                         logger.warning(f"第 {line_num} 行数据不完整，跳过: {line}")
                         continue
 
+                    # 如果不包含@符号，假设是用户名，添加@gmail.com后缀
                     if '@' not in email:
-                        logger.warning(f"第 {line_num} 行邮箱格式错误，跳过: {email}")
-                        continue
+                        email = f"{email}@gmail.com"
+                        logger.info(f"第 {line_num} 行自动添加@gmail.com后缀: {email}")
 
                     api_keys.append((email, api_key))
 
@@ -81,44 +81,16 @@ class APIKeySQLGenerator:
         logger.info("跳过生成表结构文件 - 使用现有的 sql/schema.sql")
         return "sql/schema.sql"
 
-    def generate_insert_sql(self, api_keys):
-        """动态生成INSERT SQL语句 - 适配现有表结构"""
-        if not api_keys:
-            logger.warning("没有API密钥数据，跳过生成插入SQL")
-            return None
-
-        sql_lines = [
-            "-- 动态生成的API密钥插入SQL",
-            "-- 适配现有的api_keys表结构",
-            "-- 使用INSERT OR REPLACE来处理重复的api_key",
-            ""
-        ]
-
-        for email, api_key in api_keys:
-            # 转义单引号
-            email_escaped = email.replace("'", "''")
-            api_key_escaped = api_key.replace("'", "''")
-
-            # 适配现有表结构：api_key为唯一键，gmail_email存储邮箱
-            sql = f"INSERT OR REPLACE INTO api_keys (api_key, gmail_email, is_active, created_at, updated_at, total_requests, error_count) VALUES ('{api_key_escaped}', '{email_escaped}', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 0, 0);"
-            sql_lines.append(sql)
-
-        insert_file = os.path.join(self.migrations_dir, f"insert_apikeys_{self.timestamp}.sql")
-        with open(insert_file, 'w', encoding='utf-8') as f:
-            f.write('\n'.join(sql_lines))
-
-        logger.info(f"已生成插入数据文件: {insert_file}")
-        return insert_file
-
     def generate_upsert_sql(self, api_keys):
-        """生成现代化UPSERT SQL (ON CONFLICT语法) - 适配现有表结构"""
+        """生成UPSERT SQL (ON CONFLICT语法) - 适配现有表结构"""
         if not api_keys:
+            logger.warning("没有API密钥数据，跳过生成UPSERT SQL")
             return None
 
         sql_lines = [
-            "-- 使用INSERT ... ON CONFLICT的现代化语法",
+            "-- 动态生成的API密钥UPSERT SQL",
             "-- 适配现有的api_keys表结构",
-            "-- 注意: 需要D1支持较新的SQLite版本",
+            "-- 使用INSERT ... ON CONFLICT来处理重复的api_key",
             ""
         ]
 
@@ -136,55 +108,83 @@ ON CONFLICT(api_key) DO UPDATE SET
 
             sql_lines.append(sql)
 
-        upsert_file = os.path.join(self.migrations_dir, f"upsert_apikeys_{self.timestamp}.sql")
+        upsert_file = os.path.join(self.migrations_dir, "apikeys_upsert.sql")
         with open(upsert_file, 'w', encoding='utf-8') as f:
             f.write('\n'.join(sql_lines))
 
         logger.info(f"已生成UPSERT数据文件: {upsert_file}")
         return upsert_file
 
-    def execute_wrangler_commands(self, schema_file, insert_file, auto_execute=False):
+
+    def execute_wrangler_commands(self, schema_file, upsert_file, auto_execute=False):
         """生成并可选执行wrangler命令"""
         commands = [
-            f"wrangler d1 execute {self.database_name} --file={schema_file}",
-            f"wrangler d1 execute {self.database_name} --file={insert_file}"
+            f"wrangler d1 execute {self.database_name} --file={upsert_file}"
         ]
 
         # 生成命令文件
-        commands_content = f"""# Cloudflare D1 数据库操作命令
+        # 生成本地数据库命令脚本
+        local_commands = f"""#!/bin/bash
+# Cloudflare D1 本地数据库操作脚本
 
-## 1. 表结构已存在，跳过创建
-# {commands[0]}  # 不需要执行，使用现有的sql/schema.sql
+echo "执行本地数据库操作..."
 
-## 2. 插入API密钥数据
-{commands[1]}
+# 1. 执行UPSERT操作
+wrangler d1 execute {self.database_name} --file={upsert_file}
 
-## 3. 验证数据
+# 2. 验证数据
+echo "验证数据..."
 wrangler d1 execute {self.database_name} --command="SELECT COUNT(*) as total FROM api_keys;"
 wrangler d1 execute {self.database_name} --command="SELECT api_key, gmail_email, is_active, created_at FROM api_keys ORDER BY created_at DESC LIMIT 10;"
 
-## 4. 查询特定邮箱
+# 3. 查询特定邮箱
+echo "查询Gmail邮箱..."
 wrangler d1 execute {self.database_name} --command="SELECT * FROM api_keys WHERE gmail_email LIKE '%gmail.com';"
 
-## 5. 查询激活状态的API Keys
+# 4. 查询激活状态的API Keys
+echo "查询激活状态的API Keys..."
 wrangler d1 execute {self.database_name} --command="SELECT * FROM api_keys WHERE is_active = 1;"
 
-## 6. 如果需要清空表重新导入
-wrangler d1 execute {self.database_name} --command="DELETE FROM api_keys;"
-
-## 注意事项:
-# - 表结构已存在于sql/schema.sql，无需重新创建
-# - 使用api_key作为唯一键，重复的api_key会被更新
-# - gmail_email字段存储邮箱地址
-# - is_active默认为1（激活状态）
-# - 当前配置的数据库名称是: {self.database_name}
+echo "本地数据库操作完成！"
 """
 
-        commands_file = os.path.join(self.migrations_dir, f"wrangler_commands_{self.timestamp}.txt")
-        with open(commands_file, 'w', encoding='utf-8') as f:
-            f.write(commands_content)
+        # 生成远程数据库命令脚本
+        remote_commands = f"""#!/bin/bash
+# Cloudflare D1 远程数据库操作脚本
 
-        logger.info(f"已生成wrangler命令文件: {commands_file}")
+echo "执行远程数据库操作..."
+
+# 1. 执行UPSERT操作
+wrangler d1 execute {self.database_name} --remote --file={upsert_file}
+
+# 2. 验证数据
+echo "验证数据..."
+wrangler d1 execute {self.database_name} --remote --command="SELECT COUNT(*) as total FROM api_keys;"
+wrangler d1 execute {self.database_name} --remote --command="SELECT api_key, gmail_email, is_active, created_at FROM api_keys ORDER BY created_at DESC LIMIT 10;"
+
+# 3. 查询特定邮箱
+echo "查询Gmail邮箱..."
+wrangler d1 execute {self.database_name} --remote --command="SELECT * FROM api_keys WHERE gmail_email LIKE '%gmail.com';"
+
+# 4. 查询激活状态的API Keys
+echo "查询激活状态的API Keys..."
+wrangler d1 execute {self.database_name} --remote --command="SELECT * FROM api_keys WHERE is_active = 1;"
+
+echo "远程数据库操作完成！"
+"""
+
+        # 写入本地脚本文件
+        local_file = os.path.join(self.migrations_dir, "local_commands.sh")
+        with open(local_file, 'w', encoding='utf-8') as f:
+            f.write(local_commands)
+
+        # 写入远程脚本文件
+        remote_file = os.path.join(self.migrations_dir, "remote_commands.sh")
+        with open(remote_file, 'w', encoding='utf-8') as f:
+            f.write(remote_commands)
+
+        logger.info(f"已生成本地命令脚本: {local_file}")
+        logger.info(f"已生成远程命令脚本: {remote_file}")
 
         # 如果启用自动执行
         if auto_execute:
@@ -207,7 +207,7 @@ wrangler d1 execute {self.database_name} --command="DELETE FROM api_keys;"
             logger.info("所有wrangler命令执行完成")
             return True
 
-        return commands_file
+        return (local_file, remote_file)
 
     def run(self, auto_execute=False):
         """运行完整的流程"""
@@ -219,31 +219,32 @@ wrangler d1 execute {self.database_name} --command="DELETE FROM api_keys;"
             logger.error("没有读取到有效的API密钥数据")
             return False
 
-        # 2. 生成SQL文件
+        # 2. 生成UPSERT SQL文件
         schema_file = self.generate_schema_sql()
-        insert_file = self.generate_insert_sql(api_keys)
         upsert_file = self.generate_upsert_sql(api_keys)
 
-        if not insert_file:
-            logger.error("生成插入SQL文件失败")
+        if not upsert_file:
+            logger.error("生成UPSERT SQL文件失败")
             return False
 
         # 3. 处理wrangler命令
-        result = self.execute_wrangler_commands(schema_file, insert_file, auto_execute)
+        result = self.execute_wrangler_commands(schema_file, upsert_file, auto_execute)
 
         # 4. 输出结果
         print(f"\n🎉 处理完成！")
         print(f"📊 共处理 {len(api_keys)} 条API密钥记录")
         print(f"📄 生成的文件:")
-        print(f"  - 表结构: {schema_file}")
-        print(f"  - 插入数据: {insert_file}")
         print(f"  - UPSERT数据: {upsert_file}")
 
         if not auto_execute:
-            print(f"  - 命令说明: {result}")
-            print(f"\n🚀 接下来手动执行命令:")
-            print(f"wrangler d1 execute {self.database_name} --file={schema_file}")
-            print(f"wrangler d1 execute {self.database_name} --file={insert_file}")
+            local_file, remote_file = result
+            print(f"  - 本地命令脚本: {local_file}")
+            print(f"  - 远程命令脚本: {remote_file}")
+            print(f"\n🚀 接下来执行以下命令:")
+            print(f"# 本地数据库:")
+            print(f"chmod +x {local_file} && {local_file}")
+            print(f"# 远程数据库:")
+            print(f"chmod +x {remote_file} && {remote_file}")
         else:
             print(f"✅ 数据已自动导入到数据库: {self.database_name}")
 
