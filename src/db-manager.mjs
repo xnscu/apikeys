@@ -5,7 +5,7 @@
 export class ApiKeyPoolManager {
   constructor(db) {
     this.db = db;
-    this.lastUsedIndex = 0; // 用于round-robin策略
+    // 移除内存中的lastUsedIndex，改为从数据库读取
   }
 
 
@@ -37,7 +37,7 @@ export class ApiKeyPoolManager {
 
     switch (strategy) {
       case 'round_robin':
-        selectedKey = this.selectRoundRobin(activeKeys);
+        selectedKey = await this.selectRoundRobin(activeKeys);
         break;
       case 'least_used':
         selectedKey = this.selectLeastUsed(activeKeys);
@@ -46,7 +46,7 @@ export class ApiKeyPoolManager {
         selectedKey = this.selectRandom(activeKeys);
         break;
       default:
-        selectedKey = this.selectRoundRobin(activeKeys);
+        selectedKey = await this.selectRoundRobin(activeKeys);
     }
 
     if (!selectedKey || !selectedKey.id) {
@@ -67,12 +67,48 @@ export class ApiKeyPoolManager {
   }
 
   /**
-   * 轮询选择策略
+   * 轮询选择策略 - 从数据库读取和更新索引以确保持久化
    */
-  selectRoundRobin(keys) {
-    const key = keys[this.lastUsedIndex % keys.length];
-    this.lastUsedIndex = (this.lastUsedIndex + 1) % keys.length;
-    return key;
+  async selectRoundRobin(keys) {
+    // 检查并处理索引重置逻辑
+    await this.validateRoundRobinIndex(keys.length);
+
+    // 从数据库获取当前轮询索引
+    let currentIndex = await this.getConfig('round_robin_index');
+    if (currentIndex === null) {
+      // 首次使用，初始化为0
+      currentIndex = 0;
+      await this.setConfig('round_robin_index', '0', '轮询策略当前索引');
+      await this.setConfig('round_robin_keys_count', keys.length.toString(), '轮询策略API Keys数量');
+    } else {
+      currentIndex = parseInt(currentIndex);
+    }
+
+    // 选择当前索引对应的key
+    const selectedKey = keys[currentIndex % keys.length];
+
+    // 更新索引到下一个位置
+    const nextIndex = (currentIndex + 1) % keys.length;
+    await this.setConfig('round_robin_index', nextIndex.toString(), '轮询策略当前索引');
+
+    return selectedKey;
+  }
+
+  /**
+   * 验证轮询索引 - 检查API Keys数量是否变化，如有变化则重置索引
+   */
+  async validateRoundRobinIndex(currentKeysCount) {
+    const savedKeysCount = await this.getConfig('round_robin_keys_count');
+
+    if (savedKeysCount !== null && parseInt(savedKeysCount) !== currentKeysCount) {
+      // API Keys数量发生变化，重置索引
+      await this.resetRoundRobinIndex();
+      await this.setConfig('round_robin_keys_count', currentKeysCount.toString(), '轮询策略API Keys数量');
+      console.log(`检测到API Keys数量变化 (${savedKeysCount} -> ${currentKeysCount})，已重置轮询索引`);
+    } else if (savedKeysCount === null) {
+      // 首次记录API Keys数量
+      await this.setConfig('round_robin_keys_count', currentKeysCount.toString(), '轮询策略API Keys数量');
+    }
   }
 
   /**
@@ -150,6 +186,14 @@ export class ApiKeyPoolManager {
       INSERT OR REPLACE INTO pool_config (key, value, description, updated_at)
       VALUES (?, ?, ?, CURRENT_TIMESTAMP)
     `).bind(key, value, description).run();
+  }
+
+  /**
+   * 重置轮询索引 - 当API Keys数量变化时使用
+   */
+  async resetRoundRobinIndex() {
+    await this.setConfig('round_robin_index', '0', '轮询策略当前索引');
+    console.log('轮询索引已重置为0');
   }
 
 
