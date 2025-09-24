@@ -2,5 +2,12 @@ name = "apikeys"
 main = "src/worker.mjs"
 compatibility_date = "2024-09-23"
 compatibility_flags = [ "nodejs_compat" ]
+
+# D1数据库绑定 - 你需要在Cloudflare网页端创建数据库后，将database_id替换为实际的ID
+[[d1_databases]]
+binding = "LOG"
+database_name = "apikeys-pool"
+database_id = "5d25c4ad-64db-4bcd-8ced-5fe964adf0a8"
+
 [observability.logs]
 enabled = true
