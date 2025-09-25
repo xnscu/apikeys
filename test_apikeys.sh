@@ -44,17 +44,17 @@ test_api_key() {
         --max-time $TIMEOUT \
         -X POST "$API_ENDPOINT" \
         -H "Content-Type: application/json" \
-        -H "Authorization: XXX $api_key" \
+        -H "Authorization: Bearer $api_key" \
         -d '{
             "model": "gemini-2.0-flash-exp",
             "messages": [
                 {
                     "role": "user",
-                    "content": "你好，请介绍一下自己"
+                    "content": "你好"
                 }
             ],
             "max_tokens": 1000,
-            "temperature": 0.7
+            "temperature": 0.1
         }' 2>"$log_file")
 
     # 解析响应
