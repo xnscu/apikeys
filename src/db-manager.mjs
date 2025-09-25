@@ -18,35 +18,43 @@ export class ApiKeyPoolManager {
     // 首先清理过期的错误计数
     await this.resetExpiredErrors();
 
-    // 获取所有可用的API Keys
+    // 获取所有激活的API Keys（包括有错误的）
     const queryResult = await this.db.prepare(`
       SELECT * FROM api_keys
-      WHERE is_active = 1 AND error_count < (
-        SELECT CAST(value AS INTEGER) FROM pool_config WHERE key = 'max_errors_threshold'
-      )
+      WHERE is_active = 1
       ORDER BY id
     `).all();
 
-    const activeKeys = queryResult.results || [];
+    const allKeys = queryResult.results || [];
 
-    if (activeKeys.length === 0) {
+    if (allKeys.length === 0) {
       throw new Error('没有可用的API Keys');
+    }
+
+    // 获取错误阈值
+    const maxErrorsThreshold = parseInt(await this.getConfig('max_errors_threshold') || '5');
+
+    // 过滤出可用的keys（错误数未达到阈值）
+    const availableKeys = allKeys.filter(key => key.error_count < maxErrorsThreshold);
+
+    if (availableKeys.length === 0) {
+      throw new Error('所有API Keys都已达到错误阈值，请检查key的有效性');
     }
 
     let selectedKey;
 
     switch (strategy) {
       case 'round_robin':
-        selectedKey = await this.selectRoundRobin(activeKeys);
+        selectedKey = await this.selectRoundRobinFromAvailable(allKeys, availableKeys);
         break;
       case 'least_used':
-        selectedKey = this.selectLeastUsed(activeKeys);
+        selectedKey = this.selectLeastUsed(availableKeys);
         break;
       case 'random':
-        selectedKey = this.selectRandom(activeKeys);
+        selectedKey = this.selectRandom(availableKeys);
         break;
       default:
-        selectedKey = await this.selectRoundRobin(activeKeys);
+        selectedKey = await this.selectRoundRobinFromAvailable(allKeys, availableKeys);
     }
 
     if (!selectedKey || !selectedKey.id) {
@@ -62,12 +70,63 @@ export class ApiKeyPoolManager {
       WHERE id = ?
     `).bind(selectedKey.id).run();
 
-    console.log(`选择API Key: ${selectedKey.gmail_email} (ID: ${selectedKey.id})`);
+    console.log(`选择API Key: ${selectedKey.gmail_email} (ID: ${selectedKey.id}, 错误数: ${selectedKey.error_count})`);
     return selectedKey;
   }
 
   /**
-   * 轮询选择策略 - 从数据库读取和更新索引以确保持久化
+   * 智能轮询选择策略 - 跳过出错的key，从可用的key中轮询选择
+   */
+  async selectRoundRobinFromAvailable(allKeys, availableKeys) {
+    // 检查并处理索引重置逻辑
+    await this.validateRoundRobinIndex(allKeys.length);
+
+    // 从数据库获取当前轮询索引
+    let currentIndex = await this.getConfig('round_robin_index');
+    if (currentIndex === null) {
+      // 首次使用，初始化为0
+      currentIndex = 0;
+      await this.setConfig('round_robin_index', '0', '轮询策略当前索引');
+      await this.setConfig('round_robin_keys_count', allKeys.length.toString(), '轮询策略API Keys数量');
+    } else {
+      currentIndex = parseInt(currentIndex);
+    }
+
+    // 查找下一个可用的key
+    let attempts = 0;
+    let selectedKey = null;
+    const maxAttempts = allKeys.length; // 最多尝试所有key的数量
+
+    while (attempts < maxAttempts && !selectedKey) {
+      const candidateIndex = currentIndex % allKeys.length;
+      const candidateKey = allKeys[candidateIndex];
+
+      // 检查这个key是否在可用列表中
+      if (availableKeys.find(key => key.id === candidateKey.id)) {
+        selectedKey = candidateKey;
+        break;
+      }
+
+      // 如果当前key不可用，移动到下一个
+      currentIndex = (currentIndex + 1) % allKeys.length;
+      attempts++;
+    }
+
+    if (!selectedKey) {
+      // 如果没找到可用的key，从可用列表中随机选择一个
+      selectedKey = availableKeys[Math.floor(Math.random() * availableKeys.length)];
+      console.log('轮询策略未找到合适的key，随机选择了一个可用key');
+    }
+
+    // 更新索引到下一个位置
+    const nextIndex = (currentIndex + 1) % allKeys.length;
+    await this.setConfig('round_robin_index', nextIndex.toString(), '轮询策略当前索引');
+
+    return selectedKey;
+  }
+
+  /**
+   * 传统轮询选择策略 - 保留原有方法以备其他地方使用
    */
   async selectRoundRobin(keys) {
     // 检查并处理索引重置逻辑
@@ -144,6 +203,13 @@ export class ApiKeyPoolManager {
    * 记录API Key错误
    */
   async recordError(apiKeyId, errorMessage) {
+    // 获取当前错误计数和阈值
+    const keyInfo = await this.db.prepare(`
+      SELECT error_count, gmail_email FROM api_keys WHERE id = ?
+    `).bind(apiKeyId).first();
+
+    const maxErrorsThreshold = parseInt(await this.getConfig('max_errors_threshold') || '5');
+
     await this.db.prepare(`
       UPDATE api_keys
       SET error_count = error_count + 1,
@@ -151,7 +217,13 @@ export class ApiKeyPoolManager {
       WHERE id = ?
     `).bind(apiKeyId).run();
 
-    console.log(`记录API Key错误: ID ${apiKeyId}, 错误: ${errorMessage}`);
+    const newErrorCount = (keyInfo?.error_count || 0) + 1;
+
+    if (newErrorCount >= maxErrorsThreshold) {
+      console.log(`⚠️ API Key已达到错误阈值: ${keyInfo?.gmail_email || apiKeyId} (${newErrorCount}/${maxErrorsThreshold}), 将暂时跳过使用`);
+    } else {
+      console.log(`记录API Key错误: ${keyInfo?.gmail_email || apiKeyId} (${newErrorCount}/${maxErrorsThreshold}), 错误: ${errorMessage}`);
+    }
   }
 
   /**

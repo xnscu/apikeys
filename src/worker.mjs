@@ -164,7 +164,9 @@ async function handleModels (apiKey, selectedKeyInfo = null, poolManager = null)
       );
 
       if (!response.ok) {
-        await poolManager.recordError(selectedKeyInfo.id, `HTTP ${response.status}: ${response.statusText}`);
+        const errorText = await response.clone().text();
+        await poolManager.recordError(selectedKeyInfo.id, `HTTP ${response.status}: ${response.statusText} - ${errorText}`);
+        console.log(`🔄 API Key ${selectedKeyInfo.gmail_email} 调用失败，轮询将自动跳过此key`);
       }
     } catch (error) {
       console.error('记录使用统计失败:', error);
@@ -231,7 +233,9 @@ async function handleEmbeddings (req, apiKey, selectedKeyInfo = null, poolManage
       );
 
       if (!response.ok) {
-        await poolManager.recordError(selectedKeyInfo.id, `HTTP ${response.status}: ${response.statusText}`);
+        const errorText = await response.clone().text();
+        await poolManager.recordError(selectedKeyInfo.id, `HTTP ${response.status}: ${response.statusText} - ${errorText}`);
+        console.log(`🔄 API Key ${selectedKeyInfo.gmail_email} 调用失败，轮询将自动跳过此key`);
       }
     } catch (error) {
       console.error('记录使用统计失败:', error);
@@ -313,7 +317,9 @@ async function handleCompletions (req, apiKey, selectedKeyInfo = null, poolManag
       );
 
       if (!response.ok) {
-        await poolManager.recordError(selectedKeyInfo.id, `HTTP ${response.status}: ${response.statusText}`);
+        const errorText = await response.clone().text();
+        await poolManager.recordError(selectedKeyInfo.id, `HTTP ${response.status}: ${response.statusText} - ${errorText}`);
+        console.log(`🔄 API Key ${selectedKeyInfo.gmail_email} 调用失败，轮询将自动跳过此key`);
       }
     } catch (error) {
       console.error('记录使用统计失败:', error);
