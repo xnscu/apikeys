@@ -8,11 +8,6 @@ API_ENDPOINT="http://localhost:8787/v1/chat/completions"
 APIKEYS_FILE="apikeys.txt"
 MAX_CONCURRENT_JOBS=5
 TIMEOUT=30
-LOG_DIR="./test_logs"
-TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
-
-# 创建日志目录
-mkdir -p "$LOG_DIR"
 
 # 颜色输出
 RED='\033[0;31m'
@@ -34,9 +29,6 @@ test_api_key() {
     local api_key=$2
     local test_id=$3
 
-    local log_file="$LOG_DIR/test_${username}_${TIMESTAMP}.log"
-    local result_file="$LOG_DIR/result_${username}_${TIMESTAMP}.json"
-
     print_message $BLUE "[测试 $test_id] 开始测试用户: $username"
 
     # 构建curl命令
@@ -55,40 +47,20 @@ test_api_key() {
             ],
             "max_tokens": 1000,
             "temperature": 0.1
-        }' 2>"$log_file")
+        }' 2>/dev/null)
 
     # 解析响应
     local response_body=$(echo "$curl_response" | head -n -2)
     local http_code=$(echo "$curl_response" | tail -n 2 | head -n 1)
     local time_total=$(echo "$curl_response" | tail -n 1)
 
-    # 创建结果JSON
-    cat > "$result_file" <<EOF
-{
-    "username": "$username",
-    "api_key": "$api_key",
-    "http_code": $http_code,
-    "time_total": $time_total,
-    "timestamp": "$(date -Iseconds)",
-    "test_id": $test_id
-}
-EOF
-
     # 根据HTTP状态码判断结果
     if [ "$http_code" = "200" ]; then
         print_message $GREEN "[测试 $test_id] ✅ 成功 - $username (耗时: ${time_total}s)"
-        echo "SUCCESS" > "$LOG_DIR/status_${username}_${TIMESTAMP}.txt"
     elif [ "$http_code" = "000" ]; then
         print_message $RED "[测试 $test_id] ❌ 超时或连接失败 - $username"
-        echo "TIMEOUT" > "$LOG_DIR/status_${username}_${TIMESTAMP}.txt"
     else
         print_message $YELLOW "[测试 $test_id] ⚠️  HTTP错误 $http_code - $username"
-        echo "ERROR_$http_code" > "$LOG_DIR/status_${username}_${TIMESTAMP}.txt"
-    fi
-
-    # 如果有错误日志，显示
-    if [ -s "$log_file" ]; then
-        print_message $YELLOW "[测试 $test_id] 错误详情: $(cat $log_file)"
     fi
 }
 
@@ -98,7 +70,6 @@ main() {
     print_message $BLUE "测试端点: $API_ENDPOINT"
     print_message $BLUE "最大并发数: $MAX_CONCURRENT_JOBS"
     print_message $BLUE "超时时间: ${TIMEOUT}s"
-    print_message $BLUE "日志目录: $LOG_DIR"
     echo ""
 
     # 检查apikeys.txt文件是否存在
@@ -146,54 +117,8 @@ main() {
     done
 
     echo ""
-    print_message $BLUE "=== 测试结果汇总 ==="
-
-    # 统计结果
-    local success_count=0
-    local error_count=0
-    local timeout_count=0
-
-    for status_file in "$LOG_DIR"/status_*_${TIMESTAMP}.txt; do
-        if [ -f "$status_file" ]; then
-            local status=$(cat "$status_file")
-            case "$status" in
-                "SUCCESS")
-                    success_count=$((success_count + 1))
-                    ;;
-                "TIMEOUT")
-                    timeout_count=$((timeout_count + 1))
-                    ;;
-                "ERROR_"*)
-                    error_count=$((error_count + 1))
-                    ;;
-            esac
-        fi
-    done
-
-    print_message $GREEN "✅ 成功: $success_count"
-    print_message $YELLOW "⚠️  错误: $error_count"
-    print_message $RED "❌ 超时: $timeout_count"
-    print_message $BLUE "📊 总计: $test_count"
-
-    echo ""
-    print_message $BLUE "详细日志保存在: $LOG_DIR"
-
-    # 生成汇总报告
-    local summary_file="$LOG_DIR/summary_${TIMESTAMP}.json"
-    cat > "$summary_file" <<EOF
-{
-    "timestamp": "$(date -Iseconds)",
-    "total_tests": $test_count,
-    "successful": $success_count,
-    "errors": $error_count,
-    "timeouts": $timeout_count,
-    "endpoint": "$API_ENDPOINT",
-    "max_concurrent": $MAX_CONCURRENT_JOBS,
-    "timeout_seconds": $TIMEOUT
-}
-EOF
-
-    print_message $BLUE "汇总报告: $summary_file"
+    print_message $BLUE "=== 测试完成 ==="
+    print_message $BLUE "📊 总计测试: $test_count 个API密钥"
 }
 
 # 检查依赖
