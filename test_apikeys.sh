@@ -41,7 +41,7 @@ test_api_key() {
         -H "Content-Type: application/json" \
         -H "Authorization: Bearer $api_key" \
         -d '{
-            "model": "gemini-2.0-flash-exp",
+            "model": "gemini-2.0-flash-lite",
             "messages": [
                 {
                     "role": "user",
