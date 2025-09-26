@@ -5,8 +5,9 @@
 
 # 配置
 API_ENDPOINT="http://localhost:8787/v1/chat/completions"
+API_ENDPOINT="https://apikeys.xnscu.com/v1/chat/completions"
 APIKEYS_FILE="apikeys.txt"
-MAX_CONCURRENT_JOBS=5
+MAX_CONCURRENT_JOBS=9
 TIMEOUT=30
 
 # 颜色输出
