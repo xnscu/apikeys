@@ -18,10 +18,19 @@ export class ApiKeyPoolManager {
     // 首先清理过期的错误计数
     await this.resetExpiredErrors();
 
-    // 获取所有激活的API Keys（包括有错误的）
+    // 获取所有可参与选择的API Keys：
+    // 1) is_active = 1 的key
+    // 2) is_active = 0 但 last_used_at 距今超过24小时的key（冷却期后允许重试）
     const queryResult = await this.db.prepare(`
       SELECT * FROM api_keys
-      WHERE is_active = 1
+      WHERE (
+        is_active = 1
+        OR (
+          is_active = 0
+          AND last_used_at IS NOT NULL
+          AND datetime(last_used_at, '+24 hours') <= datetime('now')
+        )
+      )
       ORDER BY id
     `).all();
 
@@ -61,12 +70,13 @@ export class ApiKeyPoolManager {
       throw new Error(`选择的API Key无效: ${JSON.stringify(selectedKey)}`);
     }
 
-    // 更新最后使用时间和使用次数
+    // 更新最后使用时间和使用次数，并在被动恢复时自动启用
     await this.db.prepare(`
       UPDATE api_keys
       SET last_used_at = CURRENT_TIMESTAMP,
           total_requests = total_requests + 1,
-          updated_at = CURRENT_TIMESTAMP
+          updated_at = CURRENT_TIMESTAMP,
+          is_active = CASE WHEN is_active = 0 THEN 1 ELSE is_active END
       WHERE id = ?
     `).bind(selectedKey.id).run();
 
@@ -223,6 +233,26 @@ export class ApiKeyPoolManager {
       console.log(`⚠️ API Key已达到错误阈值: ${keyInfo?.gmail_email || apiKeyId} (${newErrorCount}/${maxErrorsThreshold}), 将暂时跳过使用`);
     } else {
       console.log(`记录API Key错误: ${keyInfo?.gmail_email || apiKeyId} (${newErrorCount}/${maxErrorsThreshold}), 错误: ${errorMessage}`);
+    }
+  }
+
+  /**
+   * 429限流时暂时禁用Key，并记录最近一次使用时间为当前
+   * 注意：该禁用为冷却机制，24小时后在获取阶段可再次被选中
+   */
+  async disableKeyOnRateLimit(apiKeyId) {
+    try {
+      await this.db.prepare(`
+        UPDATE api_keys
+        SET is_active = 0,
+            last_used_at = CURRENT_TIMESTAMP,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `).bind(apiKeyId).run();
+      console.log(`⏸️ 因429限流，已临时禁用Key ID=${apiKeyId}（24小时后可自动参与选择）`);
+    } catch (err) {
+      console.error('禁用Key(429)失败:', err);
+      throw err;
     }
   }
 

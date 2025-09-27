@@ -167,6 +167,15 @@ async function handleModels (apiKey, selectedKeyInfo = null, poolManager = null)
         const errorText = await response.clone().text();
         await poolManager.recordError(selectedKeyInfo.id, `HTTP ${response.status}: ${response.statusText} - ${errorText}`);
         console.log(`🔄 API Key ${selectedKeyInfo.gmail_email} 调用失败，轮询将自动跳过此key`);
+
+        // 如果是429，临时禁用该Key并记录last_used_at
+        if (response.status === 429) {
+          try {
+            await poolManager.disableKeyOnRateLimit(selectedKeyInfo.id);
+          } catch (e) {
+            console.error('禁用Key(429)失败:', e);
+          }
+        }
       }
     } catch (error) {
       console.error('记录使用统计失败:', error);
@@ -236,6 +245,15 @@ async function handleEmbeddings (req, apiKey, selectedKeyInfo = null, poolManage
         const errorText = await response.clone().text();
         await poolManager.recordError(selectedKeyInfo.id, `HTTP ${response.status}: ${response.statusText} - ${errorText}`);
         console.log(`🔄 API Key ${selectedKeyInfo.gmail_email} 调用失败，轮询将自动跳过此key`);
+
+        // 如果是429，临时禁用该Key并记录last_used_at
+        if (response.status === 429) {
+          try {
+            await poolManager.disableKeyOnRateLimit(selectedKeyInfo.id);
+          } catch (e) {
+            console.error('禁用Key(429)失败:', e);
+          }
+        }
       }
     } catch (error) {
       console.error('记录使用统计失败:', error);
@@ -320,6 +338,15 @@ async function handleCompletions (req, apiKey, selectedKeyInfo = null, poolManag
         const errorText = await response.clone().text();
         await poolManager.recordError(selectedKeyInfo.id, `HTTP ${response.status}: ${response.statusText} - ${errorText}`);
         console.log(`🔄 API Key ${selectedKeyInfo.gmail_email} 调用失败，轮询将自动跳过此key`);
+
+        // 如果是429，临时禁用该Key并记录last_used_at
+        if (response.status === 429) {
+          try {
+            await poolManager.disableKeyOnRateLimit(selectedKeyInfo.id);
+          } catch (e) {
+            console.error('禁用Key(429)失败:', e);
+          }
+        }
       }
     } catch (error) {
       console.error('记录使用统计失败:', error);
