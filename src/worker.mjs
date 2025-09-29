@@ -179,7 +179,7 @@ async function handleModels (apiKey, selectedKeyInfo = null, poolManager = null)
       let errorText = null;
       if (!response.ok) {
         try {
-          errorText = await response.text();
+          errorText = await response.clone().text();
         } catch (textError) {
           console.error('获取响应文本失败:', textError);
           errorText = '无法获取错误详情';
@@ -267,7 +267,7 @@ async function handleEmbeddings (req, apiKey, selectedKeyInfo = null, poolManage
       let errorText = null;
       if (!response.ok) {
         try {
-          errorText = await response.text();
+          errorText = await response.clone().text();
         } catch (textError) {
           console.error('获取响应文本失败:', textError);
           errorText = '无法获取错误详情';
@@ -369,7 +369,7 @@ async function handleCompletions (req, apiKey, selectedKeyInfo = null, poolManag
       let errorText = null;
       if (!response.ok) {
         try {
-          errorText = await response.text();
+          errorText = await response.clone().text();
         } catch (textError) {
           console.error('获取响应文本失败:', textError);
           errorText = '无法获取错误详情';

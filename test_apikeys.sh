@@ -7,7 +7,7 @@
 API_ENDPOINT="http://localhost:8787/v1/chat/completions"
 API_ENDPOINT2="https://apikeys.xnscu.com/v2/chat/completions"
 APIKEYS_FILE="apikeys.txt"
-MAX_CONCURRENT_JOBS=9
+MAX_CONCURRENT_JOBS=1
 TIMEOUT=30
 
 # 颜色输出
@@ -40,7 +40,7 @@ test_api_key() {
         --max-time $TIMEOUT \
         -X POST "$API_ENDPOINT" \
         -H "Content-Type: application/json" \
-        -H "Authorization2: Bearer $api_key" \
+        -H "Authorization: Bearer $api_key" \
         -d '{
             "model": "gemini-2.0-flash-lite",
             "messages": [
