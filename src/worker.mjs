@@ -27,6 +27,9 @@ class LazyApiKeyPoolManager {
     return this._getInstance().recordError(keyId, errorMessage);
   }
 
+  async disableKeyOnRateLimit(keyId) {
+    return this._getInstance().disableKeyOnRateLimit(keyId);
+  }
 
   async setConfig(key, value, description) {
     return this._getInstance().setConfig(key, value, description);
