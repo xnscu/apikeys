@@ -28,7 +28,7 @@ export class ApiKeyPoolManager {
         OR (
           is_active = 0
           AND last_used_at IS NOT NULL
-          AND datetime(last_used_at, '+24 hours') <= datetime('now')
+          AND datetime(last_used_at, '+720 hours') <= datetime('now')
         )
       )
       ORDER BY id
