@@ -140,7 +140,7 @@ const handleOPTIONS = async () => {
 };
 
 const BASE_URL = "https://generativelanguage.googleapis.com";
-const API_VERSION = "v1beta";
+const API_VERSION = "v1";
 
 // https://github.com/google-gemini/generative-ai-js/blob/cf223ff4a1ee5a2d944c53cddb8976136382bee6/src/requests/request.ts#L71
 const API_CLIENT = "genai-js/0.21.0"; // npm view @google/generative-ai version
@@ -158,16 +158,26 @@ async function handleModels (apiKey, selectedKeyInfo = null, poolManager = null)
   // 记录使用统计
   if (selectedKeyInfo && poolManager) {
     try {
+      // 获取错误文本（如果有的话）
+      let errorText = null;
+      if (!response.ok) {
+        try {
+          errorText = await response.text();
+        } catch (textError) {
+          console.error('获取响应文本失败:', textError);
+          errorText = '无法获取错误详情';
+        }
+      }
+
       await poolManager.recordUsage(
         selectedKeyInfo.id,
         'models',
         response.status,
         0, // models端点不涉及token使用
-        response.ok ? null : await response.clone().text()
+        errorText
       );
 
       if (!response.ok) {
-        const errorText = await response.clone().text();
         await poolManager.recordError(selectedKeyInfo.id, `HTTP ${response.status}: ${response.statusText} - ${errorText}`);
         console.log(`🔄 API Key ${selectedKeyInfo.gmail_email} 调用失败，轮询将自动跳过此key`);
 
@@ -236,16 +246,26 @@ async function handleEmbeddings (req, apiKey, selectedKeyInfo = null, poolManage
   // 记录使用统计
   if (selectedKeyInfo && poolManager) {
     try {
+      // 获取错误文本（如果有的话）
+      let errorText = null;
+      if (!response.ok) {
+        try {
+          errorText = await response.text();
+        } catch (textError) {
+          console.error('获取响应文本失败:', textError);
+          errorText = '无法获取错误详情';
+        }
+      }
+
       await poolManager.recordUsage(
         selectedKeyInfo.id,
         'embeddings',
         response.status,
         0, // embeddings的token计算比较复杂，暂时设为0
-        response.ok ? null : await response.clone().text()
+        errorText
       );
 
       if (!response.ok) {
-        const errorText = await response.clone().text();
         await poolManager.recordError(selectedKeyInfo.id, `HTTP ${response.status}: ${response.statusText} - ${errorText}`);
         console.log(`🔄 API Key ${selectedKeyInfo.gmail_email} 调用失败，轮询将自动跳过此key`);
 
@@ -328,17 +348,27 @@ async function handleCompletions (req, apiKey, selectedKeyInfo = null, poolManag
   let tokensUsed = 0;
   if (selectedKeyInfo && poolManager) {
     try {
+      // 获取错误文本（如果有的话）
+      let errorText = null;
+      if (!response.ok) {
+        try {
+          errorText = await response.text();
+        } catch (textError) {
+          console.error('获取响应文本失败:', textError);
+          errorText = '无法获取错误详情';
+        }
+      }
+
       // 对于流式响应，我们无法立即获取token统计，所以先记录请求
       await poolManager.recordUsage(
         selectedKeyInfo.id,
         'chat/completions',
         response.status,
         tokensUsed, // 流式响应的token会在后续更新
-        response.ok ? null : await response.clone().text()
+        errorText
       );
 
       if (!response.ok) {
-        const errorText = await response.clone().text();
         await poolManager.recordError(selectedKeyInfo.id, `HTTP ${response.status}: ${response.statusText} - ${errorText}`);
         console.log(`🔄 API Key ${selectedKeyInfo.gmail_email} 调用失败，轮询将自动跳过此key`);
 
