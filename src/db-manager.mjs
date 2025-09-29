@@ -299,6 +299,16 @@ export class ApiKeyPoolManager {
   }
 
 
+  /**
+   * 通过API Key值反查数据库记录
+   */
+  async getApiKeyByValue(apiKey) {
+    if (!apiKey) { return null; }
+    const result = await this.db.prepare(`
+      SELECT * FROM api_keys WHERE api_key = ? LIMIT 1
+    `).bind(apiKey).first();
+    return result || null;
+  }
 
 
 }

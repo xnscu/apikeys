@@ -35,6 +35,10 @@ class LazyApiKeyPoolManager {
     return this._getInstance().setConfig(key, value, description);
   }
 
+  async getApiKeyByValue(apiKey) {
+    return this._getInstance().getApiKeyByValue(apiKey);
+  }
+
   get db() {
     return this._getInstance().db;
   }
@@ -89,6 +93,19 @@ export default {
               console.log(`回退使用环境变量API KEY ${index}: ${apiKey}`);
             }
           }
+        }
+      }
+
+      // 如果apiKey来自请求头或环境变量，但我们仍希望能统计与限流保护，尝试反查数据库记录
+      if (!selectedKeyInfo && apiKey) {
+        try {
+          const info = await poolManager.getApiKeyByValue(apiKey);
+          if (info && info.id) {
+            selectedKeyInfo = info;
+            console.log(`根据apiKey反查到数据库记录: ${info.gmail_email} (ID: ${info.id})`);
+          }
+        } catch (e) {
+          console.error('通过apiKey反查数据库记录失败:', e);
         }
       }
 
