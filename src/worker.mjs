@@ -140,6 +140,11 @@ class HttpError extends Error {
   }
 }
 
+// 判断是否是限流或禁止访问的状态码
+const isRateLimitOrForbidden = (status) => {
+  return status === 429 || status === 403;
+};
+
 const fixCors = ({ headers, status, statusText }) => {
   headers = new Headers(headers);
   headers.set("Access-Control-Allow-Origin", "*");
@@ -199,7 +204,7 @@ async function handleModels (apiKey, selectedKeyInfo = null, poolManager = null)
         console.log(`🔄 API Key ${selectedKeyInfo.gmail_email} 调用失败，轮询将自动跳过此key`);
 
         // 如果是429，临时禁用该Key并记录last_used_at
-        if (response.status === 429) {
+        if (isRateLimitOrForbidden(response.status)) {
           try {
             await poolManager.disableKeyOnRateLimit(selectedKeyInfo.id);
           } catch (e) {
@@ -287,7 +292,7 @@ async function handleEmbeddings (req, apiKey, selectedKeyInfo = null, poolManage
         console.log(`🔄 API Key ${selectedKeyInfo.gmail_email} 调用失败，轮询将自动跳过此key`);
 
         // 如果是429，临时禁用该Key并记录last_used_at
-        if (response.status === 429) {
+        if (isRateLimitOrForbidden(response.status)) {
           try {
             await poolManager.disableKeyOnRateLimit(selectedKeyInfo.id);
           } catch (e) {
@@ -390,7 +395,7 @@ async function handleCompletions (req, apiKey, selectedKeyInfo = null, poolManag
         console.log(`🔄 API Key ${selectedKeyInfo.gmail_email} 调用失败，轮询将自动跳过此key`);
 
         // 如果是429，临时禁用该Key并记录last_used_at
-        if (response.status === 429) {
+        if (isRateLimitOrForbidden(response.status)) {
           try {
             await poolManager.disableKeyOnRateLimit(selectedKeyInfo.id);
           } catch (e) {
