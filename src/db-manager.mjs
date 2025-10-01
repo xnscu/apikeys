@@ -8,15 +8,12 @@ export class ApiKeyPoolManager {
     // 移除内存中的lastUsedIndex，改为从数据库读取
   }
 
-
-
-
   /**
    * 获取下一个可用的API Key（循环获取）
    */
   async getNextApiKey(strategy = 'round_robin') {
     // 首先清理过期的错误计数
-    await this.resetExpiredErrors();
+    // await this.resetExpiredErrors();
 
     // 获取所有可参与选择的API Keys：
     // 1) is_active = 1 的key
