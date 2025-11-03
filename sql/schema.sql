@@ -54,5 +54,6 @@ INSERT
     VALUES ('rotation_strategy', 'round_robin', '轮询策略: round_robin, least_used, random'),
 ('max_errors_threshold', '5', '最大错误次数阈值，超过后暂时禁用key'),
 ('error_reset_interval', '3600', '错误计数重置间隔（秒）'),
-('enable_usage_tracking', '1', '是否启用详细使用统计');
+('enable_usage_tracking', '1', '是否启用详细使用统计'),
+('cooldown_hours', '24', 'API Key冷却期小时数（禁用后多久可重新使用，24=1天，168=7天，720=30天）');
 

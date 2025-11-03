@@ -15,9 +15,12 @@ export class ApiKeyPoolManager {
     // 首先清理过期的错误计数
     // await this.resetExpiredErrors();
 
+    // 获取冷却期配置（单位：小时）
+    const cooldownHours = parseInt(await this.getConfig('cooldown_hours') || '24');
+
     // 获取所有可参与选择的API Keys：
     // 1) is_active = 1 的key
-    // 2) is_active = 0 但 last_used_at 距今超过24小时的key（冷却期后允许重试）
+    // 2) is_active = 0 但 last_used_at 距今超过配置的冷却期的key（冷却期后允许重试）
     const queryResult = await this.db.prepare(`
       SELECT * FROM api_keys
       WHERE (
@@ -25,11 +28,11 @@ export class ApiKeyPoolManager {
         OR (
           is_active = 0
           AND last_used_at IS NOT NULL
-          AND datetime(last_used_at, '+720 hours') <= datetime('now')
+          AND datetime(last_used_at, '+' || ? || ' hours') <= datetime('now')
         )
       )
       ORDER BY id
-    `).all();
+    `).bind(cooldownHours).all();
 
     const allKeys = queryResult.results || [];
 
@@ -235,10 +238,11 @@ export class ApiKeyPoolManager {
 
   /**
    * 429限流时暂时禁用Key，并记录最近一次使用时间为当前
-   * 注意：该禁用为冷却机制，24小时后在获取阶段可再次被选中
+   * 注意：该禁用为冷却机制，冷却期（由cooldown_hours配置决定）后在获取阶段可再次被选中
    */
   async disableKeyOnRateLimit(apiKeyId) {
     try {
+      const cooldownHours = parseInt(await this.getConfig('cooldown_hours') || '24');
       await this.db.prepare(`
         UPDATE api_keys
         SET is_active = 0,
@@ -246,7 +250,7 @@ export class ApiKeyPoolManager {
             updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
       `).bind(apiKeyId).run();
-      console.log(`⏸️ 因429限流，已临时禁用Key ID=${apiKeyId}（24小时后可自动参与选择）`);
+      console.log(`⏸️ 因429限流，已临时禁用Key ID=${apiKeyId}（${cooldownHours}小时后可自动参与选择）`);
     } catch (err) {
       console.error('禁用Key(429)失败:', err);
       throw err;
