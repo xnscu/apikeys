@@ -7,12 +7,9 @@
   },
   "scripts": {
     "c": "git add . && git commit -am ",
-    "postc": "git push origin master",
-    "pull": "git pull origin master ",
     "g": "yarn c",
-    "postg": "yarn postpush",
-    "preb": "npm --no-git-tag-version version minor",
-    "b": "yarn build && yarn c",
+    "postg": "git push origin master",
+    "pull": "git pull origin master ",
     "start": "node node.mjs",
     "dev": "nodemon --watch node.mjs --watch src/*.mjs node.mjs",
     "start:deno": "deno --allow-env --allow-net deno.mjs",
@@ -20,5 +17,6 @@
     "start:bun": "bun bun.mjs",
     "dev:bun": "bun --watch bun.mjs"
   },
-  "name": "apikeys"
+  "name": "apikeys",
+  "version": "0.1.0"
 }
