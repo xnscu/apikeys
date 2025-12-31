@@ -1,6 +1,12 @@
 # Gemini API Keys 连接池
 
-一个基于Cloudflare Workers的Gemini API key连接池应用，支持多个API keys的负载均衡和轮询使用。
+一个基于 Cloudflare Workers 的 Gemini API key 连接池应用，支持多个 API keys 的负载均衡和轮询使用。
+
+# 查询可用模型
+
+```
+curl -s https://apikeys.xnscu.com/v1/models | jq -r '.data[] | .id' 2>/dev/null
+```
 
 ## 📁 项目结构
 
@@ -51,7 +57,7 @@ wrangler deploy
 ## 📖 详细文档
 
 - **[完整使用文档](docs/README.md)** - 详细的部署和使用说明
-- **[API调用示例](docs/examples.md)** - 多语言调用示例和管理API
+- **[API 调用示例](docs/examples.md)** - 多语言调用示例和管理 API
 
 ## ✨ 主要功能
 
@@ -62,11 +68,10 @@ wrangler deploy
 
 ## 🎯 使用场景
 
-- 多个Gemini API keys的负载均衡
-- API调用的统计和监控
+- 多个 Gemini API keys 的负载均衡
+- API 调用的统计和监控
 - 自动故障转移和恢复
-- 企业级API key管理
-
+- 企业级 API key 管理
 
 ## 📄 许可证
 
