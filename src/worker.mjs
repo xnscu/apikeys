@@ -109,21 +109,36 @@ export default {
         }
       }
 
-      // 从 URL 中提取 API 版本 (支持 /v1/, /v1beta/, /v1alpha/ 路径)
-      const versionMatch = pathname.match(/\/(v1beta|v1alpha|v1)\//);
-      const apiVersion = versionMatch ? versionMatch[1] : "v1beta"; // 默认使用 v1beta
+      // 从 URL 中提取 API 版本和端点，原样传递给 Google API
+      // 支持格式: /(任意版本)?/(端点)
+      const pathMatch = pathname.match(/^\/([^/]+)\/(.+)$/);
 
-      // API端点路由
-      switch (true) {
-        case pathname.endsWith("/chat/completions"):
+      let apiVersion = "v1beta"; // 默认版本
+      let endpoint = pathname.substring(1); // 移除开头的 /
+
+      if (pathMatch) {
+        // 检查第一部分是否看起来像版本号（v开头）
+        if (pathMatch[1].startsWith('v')) {
+          // 有版本号: /v1/models, /v2/chat/completions 等
+          apiVersion = pathMatch[1];
+          endpoint = pathMatch[2];
+        } else {
+          // 第一部分不是版本号，整个路径作为端点: /something/else
+          endpoint = pathMatch[1] + '/' + pathMatch[2];
+        }
+      }
+
+      // API端点路由 (严格匹配端点名称)
+      switch (endpoint) {
+        case "chat/completions":
           assert(request.method === "POST");
           return handleCompletions(await request.json(), apiKey, selectedKeyInfo, poolManager, apiVersion)
             .catch(errHandler);
-        case pathname.endsWith("/embeddings"):
+        case "embeddings":
           assert(request.method === "POST");
           return handleEmbeddings(await request.json(), apiKey, selectedKeyInfo, poolManager, apiVersion)
             .catch(errHandler);
-        case pathname.endsWith("/models"):
+        case "models":
           assert(request.method === "GET");
           return handleModels(apiKey, selectedKeyInfo, poolManager, apiVersion)
             .catch(errHandler);

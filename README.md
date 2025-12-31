@@ -48,6 +48,32 @@ curl -X POST https://apikeys.xnscu.com/v1alpha/chat/completions \
 - **v1beta** / **v1alpha**: 50+ 个模型（包含 Gemini 3.x、Gemma 3、Imagen 4.0、Veo 3.0 等）
 - 注：v1alpha 和 v1beta 的模型列表完全相同
 
+**路径格式说明：**
+
+✅ 支持的路径格式：
+
+- `/v{任意版本号}/{端点}` - 原样传递给 Google API
+- `/{端点}` - 使用默认版本 (v1beta)
+
+📌 版本号处理：
+
+- 任何以 `v` 开头的版本号都会被原样传递给 Google API（如 `/v1/`, `/v2/`, `/v999/` 等）
+- 如果 Google 不支持该版本，会返回 Google 的真实错误（通常是 404）
+- 这样可以确保错误信息来自 Google，便于调试和问题追踪
+- 如果 Google 未来发布新版本（如 v2），代理无需修改即可支持
+
+✅ 有效示例：
+
+- `/v1/models` → Google API v1 (200 OK)
+- `/v1beta/models` → Google API v1beta (200 OK)
+- `/v1alpha/models` → Google API v1alpha (200 OK)
+- `/models` → Google API v1beta (默认版本)
+
+⚠️ 无效版本示例（返回 Google 的错误）：
+
+- `/v2/models` → Google API v2 (404 Not Found)
+- `/v999/chat/completions` → Google API v999 (404 Not Found)
+
 ## 📁 项目结构
 
 ```
