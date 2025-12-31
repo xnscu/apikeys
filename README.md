@@ -2,11 +2,51 @@
 
 一个基于 Cloudflare Workers 的 Gemini API key 连接池应用，支持多个 API keys 的负载均衡和轮询使用。
 
-# 查询可用模型
+## 🆕 API 版本控制
 
+现在支持通过 URL 路径控制使用的 Google API 版本：
+
+### v1 (稳定版)
+
+```bash
+# 查询模型
+curl https://apikeys.xnscu.com/v1/models
+
+# 调用 Chat API
+curl -X POST https://apikeys.xnscu.com/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model": "gemini-2.5-flash", "messages": [{"role": "user", "content": "你好"}]}'
 ```
-curl -s https://apikeys.xnscu.com/v1/models | jq -r '.data[] | .id' 2>/dev/null
+
+### v1beta (测试版，包含 Gemini 3)
+
+```bash
+# 查询所有模型（包含实验性模型）
+curl https://apikeys.xnscu.com/v1beta/models
+
+# 调用 Gemini 3 模型
+curl -X POST https://apikeys.xnscu.com/v1beta/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model": "gemini-3-flash-preview", "messages": [{"role": "user", "content": "你好"}]}'
 ```
+
+### v1alpha (内测版，功能同 v1beta)
+
+```bash
+# v1alpha 模型列表与 v1beta 完全相同
+curl https://apikeys.xnscu.com/v1alpha/models
+
+# 使用方式同 v1beta
+curl -X POST https://apikeys.xnscu.com/v1alpha/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model": "gemini-3-flash-preview", "messages": [{"role": "user", "content": "你好"}]}'
+```
+
+**版本对比：**
+
+- **v1**: 9 个稳定模型（仅 Gemini 2.x 系列）
+- **v1beta** / **v1alpha**: 50+ 个模型（包含 Gemini 3.x、Gemma 3、Imagen 4.0、Veo 3.0 等）
+- 注：v1alpha 和 v1beta 的模型列表完全相同
 
 ## 📁 项目结构
 
@@ -65,6 +105,8 @@ wrangler deploy
 - 📊 详细的使用统计和监控
 - 🛡️ 自动错误处理和恢复
 - 🔧 动态配置管理
+- 🆕 API 版本控制（v1 / v1beta）
+- 🚀 支持最新的 Gemini 3 系列模型
 
 ## 🎯 使用场景
 

@@ -109,19 +109,23 @@ export default {
         }
       }
 
+      // 从 URL 中提取 API 版本 (支持 /v1/, /v1beta/, /v1alpha/ 路径)
+      const versionMatch = pathname.match(/\/(v1beta|v1alpha|v1)\//);
+      const apiVersion = versionMatch ? versionMatch[1] : "v1beta"; // 默认使用 v1beta
+
       // API端点路由
       switch (true) {
         case pathname.endsWith("/chat/completions"):
           assert(request.method === "POST");
-          return handleCompletions(await request.json(), apiKey, selectedKeyInfo, poolManager)
+          return handleCompletions(await request.json(), apiKey, selectedKeyInfo, poolManager, apiVersion)
             .catch(errHandler);
         case pathname.endsWith("/embeddings"):
           assert(request.method === "POST");
-          return handleEmbeddings(await request.json(), apiKey, selectedKeyInfo, poolManager)
+          return handleEmbeddings(await request.json(), apiKey, selectedKeyInfo, poolManager, apiVersion)
             .catch(errHandler);
         case pathname.endsWith("/models"):
           assert(request.method === "GET");
-          return handleModels(apiKey, selectedKeyInfo, poolManager)
+          return handleModels(apiKey, selectedKeyInfo, poolManager, apiVersion)
             .catch(errHandler);
         default:
           throw new HttpError("404 Not Found", 404);
@@ -162,7 +166,6 @@ const handleOPTIONS = async () => {
 };
 
 const BASE_URL = "https://generativelanguage.googleapis.com";
-const API_VERSION = "v1beta"; // 改为 v1beta 以支持最新模型（包括 Gemini 3）
 
 // https://github.com/google-gemini/generative-ai-js/blob/cf223ff4a1ee5a2d944c53cddb8976136382bee6/src/requests/request.ts#L71
 const API_CLIENT = "genai-js/0.21.0"; // npm view @google/generative-ai version
@@ -172,8 +175,8 @@ const makeHeaders = (apiKey, more) => ({
   ...more
 });
 
-async function handleModels (apiKey, selectedKeyInfo = null, poolManager = null) {
-  const response = await fetch(`${BASE_URL}/${API_VERSION}/models`, {
+async function handleModels (apiKey, selectedKeyInfo = null, poolManager = null, apiVersion = "v1beta") {
+  const response = await fetch(`${BASE_URL}/${apiVersion}/models`, {
     headers: makeHeaders(apiKey),
   });
 
@@ -234,7 +237,7 @@ async function handleModels (apiKey, selectedKeyInfo = null, poolManager = null)
 }
 
 const DEFAULT_EMBEDDINGS_MODEL = "gemini-embedding-001";
-async function handleEmbeddings (req, apiKey, selectedKeyInfo = null, poolManager = null) {
+async function handleEmbeddings (req, apiKey, selectedKeyInfo = null, poolManager = null, apiVersion = "v1beta") {
   let modelFull, model;
   switch (true) {
     case typeof req.model !== "string":
@@ -253,7 +256,7 @@ async function handleEmbeddings (req, apiKey, selectedKeyInfo = null, poolManage
   if (!Array.isArray(req.input)) {
     req.input = [ req.input ];
   }
-  const response = await fetch(`${BASE_URL}/${API_VERSION}/${modelFull}:batchEmbedContents`, {
+  const response = await fetch(`${BASE_URL}/${apiVersion}/${modelFull}:batchEmbedContents`, {
     method: "POST",
     headers: makeHeaders(apiKey, { "Content-Type": "application/json" }),
     body: JSON.stringify({
@@ -322,7 +325,7 @@ async function handleEmbeddings (req, apiKey, selectedKeyInfo = null, poolManage
 }
 
 const DEFAULT_MODEL = "gemini-2.5-flash";
-async function handleCompletions (req, apiKey, selectedKeyInfo = null, poolManager = null) {
+async function handleCompletions (req, apiKey, selectedKeyInfo = null, poolManager = null, apiVersion = "v1beta") {
   let model;
   switch (true) {
     case typeof req.model !== "string":
@@ -358,7 +361,7 @@ async function handleCompletions (req, apiKey, selectedKeyInfo = null, poolManag
       body.tools.push({googleSearch: {}});
   }
   const TASK = req.stream ? "streamGenerateContent" : "generateContent";
-  let url = `${BASE_URL}/${API_VERSION}/models/${model}:${TASK}`;
+  let url = `${BASE_URL}/${apiVersion}/models/${model}:${TASK}`;
   if (req.stream) { url += "?alt=sse"; }
   const response = await fetch(url, {
     method: "POST",
