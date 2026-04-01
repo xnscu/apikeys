@@ -1,57 +1,13 @@
 import { Buffer } from "node:buffer";
 import { ApiKeyPoolManager } from "./db-manager.mjs";
 
-// 懒加载包装器类
-class LazyApiKeyPoolManager {
-  constructor(db) {
-    this._db = db;
-    this._instance = null;
-  }
-
-  _getInstance() {
-    if (!this._instance) {
-      this._instance = new ApiKeyPoolManager(this._db);
-    }
-    return this._instance;
-  }
-
-  async getNextApiKey() {
-    return this._getInstance().getNextApiKey();
-  }
-
-  async recordUsage(keyId, endpoint, status, tokensUsed, errorMessage) {
-    return this._getInstance().recordUsage(keyId, endpoint, status, tokensUsed, errorMessage);
-  }
-
-  async recordError(keyId, errorMessage) {
-    return this._getInstance().recordError(keyId, errorMessage);
-  }
-
-  async disableKeyOnRateLimit(keyId) {
-    return this._getInstance().disableKeyOnRateLimit(keyId);
-  }
-
-  async setConfig(key, value, description) {
-    return this._getInstance().setConfig(key, value, description);
-  }
-
-  async getApiKeyByValue(apiKey) {
-    return this._getInstance().getApiKeyByValue(apiKey);
-  }
-
-  get db() {
-    return this._getInstance().db;
-  }
-}
-
 export default {
-  async fetch (request, env) {
+  async fetch(request, env, ctx) {
     if (request.method === "OPTIONS") {
       return handleOPTIONS();
     }
 
-    // 使用懒加载的数据库连接池管理器
-    const poolManager = new LazyApiKeyPoolManager(env.DB);
+    const poolManager = new ApiKeyPoolManager(env?.DB);
 
     const errHandler = (err) => {
       console.error(err);
@@ -61,90 +17,128 @@ export default {
     try {
       const { pathname } = new URL(request.url);
 
+      // 从 URL 中提取 API 版本和端点
+      const pathMatch = pathname.match(/^\/([^/]+)\/(.+)$/);
+      let apiVersion = "v1beta";
+      let endpoint = pathname.substring(1);
 
-      const assert = (success) => {
-        if (!success) {
-          throw new HttpError("The specified HTTP method is not allowed for the requested resource", 400);
+      if (pathMatch) {
+        if (pathMatch[1].startsWith('v')) {
+          apiVersion = pathMatch[1];
+          endpoint = pathMatch[2];
+        } else {
+          endpoint = pathMatch[1] + '/' + pathMatch[2];
         }
-      };
+      }
 
-      // 获取API Key
+      // 验证端点和请求方法
+      switch (endpoint) {
+        case "chat/completions":
+        case "embeddings":
+          if (request.method !== "POST") {
+            throw new HttpError("The specified HTTP method is not allowed for the requested resource", 400);
+          }
+          break;
+        case "models":
+          if (request.method !== "GET") {
+            throw new HttpError("The specified HTTP method is not allowed for the requested resource", 400);
+          }
+          break;
+        default:
+          throw new HttpError("404 Not Found", 404);
+      }
+
+      // POST 请求只解析一次 body（支持重试）
+      let reqBody = null;
+      if (request.method === "POST") {
+        reqBody = await request.json();
+      }
+
+      // 获取用户提供的 API Key
       const auth = request.headers.get("Authorization");
-      let apiKey = auth?.split(" ")[1];
-      let selectedKeyInfo = null;
+      const userApiKey = auth?.split(" ")[1];
 
-      if (!apiKey) {
+      if (userApiKey) {
+        // 用户自带 Key：单次请求，可选统计
+        let selectedKeyInfo = null;
         try {
-          // 从连接池获取API Key
+          selectedKeyInfo = await poolManager.getApiKeyByValue(userApiKey);
+        } catch (e) { /* 统计是可选的 */ }
+
+        let response;
+        try {
+          response = await dispatchHandler(endpoint, reqBody, userApiKey, apiVersion);
+        } catch (err) {
+          return errHandler(err);
+        }
+
+        const recordPromise = recordApiResult(response, selectedKeyInfo, poolManager, endpoint);
+        ctx?.waitUntil?.(recordPromise);
+        return response;
+      }
+
+      // 连接池模式：429/403 时自动换 Key 重试
+      const MAX_RETRIES = 3;
+      let lastResponse = null;
+
+      for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+        let apiKey, selectedKeyInfo;
+
+        try {
           selectedKeyInfo = await poolManager.getNextApiKey();
           apiKey = selectedKeyInfo.api_key;
           console.log(`使用连接池API Key: ${selectedKeyInfo.gmail_email}`);
         } catch (error) {
           console.error("获取API Key失败:", error);
-          // 如果数据库连接池没有可用的key，回退到环境变量
+          // 回退到环境变量
           if (env?.GEMINI_API_KEYS) {
-            const keys = String(env.GEMINI_API_KEYS)
-              .split(",")
-              .map(s => s.trim())
-              .filter(Boolean);
+            const keys = String(env.GEMINI_API_KEYS).split(",").map(s => s.trim()).filter(Boolean);
             if (keys.length) {
-              const index = Math.floor(Math.random() * keys.length);
-              apiKey = keys[index];
-              console.log(`回退使用环境变量API KEY ${index}: ${apiKey}`);
+              apiKey = keys[Math.floor(Math.random() * keys.length)];
             }
           }
-        }
-      }
-
-      // 如果apiKey来自请求头或环境变量，但我们仍希望能统计与限流保护，尝试反查数据库记录
-      if (!selectedKeyInfo && apiKey) {
-        try {
-          const info = await poolManager.getApiKeyByValue(apiKey);
-          if (info && info.id) {
-            selectedKeyInfo = info;
-            console.log(`根据apiKey反查到数据库记录: ${info.gmail_email} (ID: ${info.id})`);
+          if (!apiKey) {
+            if (lastResponse) return lastResponse;
+            throw new HttpError("No API keys available", 503);
           }
-        } catch (e) {
-          console.error('通过apiKey反查数据库记录失败:', e);
+          // 环境变量 Key 不重试、不统计
+          try {
+            return await dispatchHandler(endpoint, reqBody, apiKey, apiVersion);
+          } catch (err) {
+            return errHandler(err);
+          }
         }
-      }
 
-      // 从 URL 中提取 API 版本和端点，原样传递给 Google API
-      // 支持格式: /(任意版本)?/(端点)
-      const pathMatch = pathname.match(/^\/([^/]+)\/(.+)$/);
-
-      let apiVersion = "v1beta"; // 默认版本
-      let endpoint = pathname.substring(1); // 移除开头的 /
-
-      if (pathMatch) {
-        // 检查第一部分是否看起来像版本号（v开头）
-        if (pathMatch[1].startsWith('v')) {
-          // 有版本号: /v1/models, /v2/chat/completions 等
-          apiVersion = pathMatch[1];
-          endpoint = pathMatch[2];
-        } else {
-          // 第一部分不是版本号，整个路径作为端点: /something/else
-          endpoint = pathMatch[1] + '/' + pathMatch[2];
+        let response;
+        try {
+          response = await dispatchHandler(endpoint, reqBody, apiKey, apiVersion);
+        } catch (err) {
+          return errHandler(err);
         }
+
+        // 429/403 时记录错误并重试下一个 Key
+        if (isRateLimitOrForbidden(response.status) && attempt < MAX_RETRIES - 1) {
+          await recordApiResult(response, selectedKeyInfo, poolManager, endpoint);
+          console.log(`第${attempt + 1}次尝试失败(${response.status})，使用下一个Key重试...`);
+          lastResponse = response;
+          continue;
+        }
+
+        // 最终响应：后台记录统计，不阻塞返回
+        const recordPromise = recordApiResult(response, selectedKeyInfo, poolManager, endpoint);
+        ctx?.waitUntil?.(recordPromise);
+
+        // 1% 概率清理过期使用记录
+        if (Math.random() < 0.01) {
+          ctx?.waitUntil?.(poolManager.cleanupOldUsageRecords(30).catch(() => {}));
+        }
+
+        return response;
       }
 
-      // API端点路由 (严格匹配端点名称)
-      switch (endpoint) {
-        case "chat/completions":
-          assert(request.method === "POST");
-          return handleCompletions(await request.json(), apiKey, selectedKeyInfo, poolManager, apiVersion)
-            .catch(errHandler);
-        case "embeddings":
-          assert(request.method === "POST");
-          return handleEmbeddings(await request.json(), apiKey, selectedKeyInfo, poolManager, apiVersion)
-            .catch(errHandler);
-        case "models":
-          assert(request.method === "GET");
-          return handleModels(apiKey, selectedKeyInfo, poolManager, apiVersion)
-            .catch(errHandler);
-        default:
-          throw new HttpError("404 Not Found", 404);
-      }
+      // 所有重试耗尽
+      if (lastResponse) return lastResponse;
+      throw new HttpError("All API keys exhausted", 503);
     } catch (err) {
       return errHandler(err);
     }
@@ -159,7 +153,6 @@ class HttpError extends Error {
   }
 }
 
-// 判断是否是限流或禁止访问的状态码
 const isRateLimitOrForbidden = (status) => {
   return status === 429 || status === 403;
 };
@@ -170,7 +163,7 @@ const fixCors = ({ headers, status, statusText }) => {
   return { headers, status, statusText };
 };
 
-const handleOPTIONS = async () => {
+const handleOPTIONS = () => {
   return new Response(null, {
     headers: {
       "Access-Control-Allow-Origin": "*",
@@ -179,6 +172,53 @@ const handleOPTIONS = async () => {
     }
   });
 };
+
+/**
+ * 统一的 API 调用结果记录（提取自三个 handler 中的重复代码）
+ * 仅对 Key 相关错误（401/403/429）递增 error_count
+ */
+async function recordApiResult(response, selectedKeyInfo, poolManager, endpoint) {
+  if (!selectedKeyInfo || !poolManager) return;
+
+  try {
+    let errorText = null;
+    if (!response.ok) {
+      try {
+        errorText = await response.clone().text();
+      } catch (e) {
+        errorText = '无法获取错误详情';
+      }
+    }
+
+    await poolManager.recordUsage(
+      selectedKeyInfo.id, endpoint, response.status, 0, errorText
+    );
+
+    const status = response.status;
+    if (status === 401 || status === 403 || status === 429) {
+      await poolManager.recordError(
+        selectedKeyInfo.id,
+        `HTTP ${status}: ${errorText}`
+      );
+      if (status === 429 || status === 403) {
+        await poolManager.disableKeyOnRateLimit(selectedKeyInfo.id);
+      }
+    }
+  } catch (error) {
+    console.error('记录使用统计失败:', error);
+  }
+}
+
+async function dispatchHandler(endpoint, reqBody, apiKey, apiVersion) {
+  switch (endpoint) {
+    case "chat/completions":
+      return await handleCompletions(reqBody, apiKey, apiVersion);
+    case "embeddings":
+      return await handleEmbeddings(reqBody, apiKey, apiVersion);
+    case "models":
+      return await handleModels(apiKey, apiVersion);
+  }
+}
 
 const BASE_URL = "https://generativelanguage.googleapis.com";
 
@@ -190,50 +230,10 @@ const makeHeaders = (apiKey, more) => ({
   ...more
 });
 
-async function handleModels (apiKey, selectedKeyInfo = null, poolManager = null, apiVersion = "v1beta") {
+async function handleModels(apiKey, apiVersion = "v1beta") {
   const response = await fetch(`${BASE_URL}/${apiVersion}/models`, {
     headers: makeHeaders(apiKey),
   });
-
-  // 记录使用统计
-  if (selectedKeyInfo && poolManager) {
-    try {
-      // 获取错误文本（如果有的话）
-      let errorText = null;
-      if (!response.ok) {
-        try {
-          errorText = await response.clone().text();
-        } catch (textError) {
-          console.error('获取响应文本失败:', textError);
-          errorText = '无法获取错误详情';
-        }
-      }
-
-      await poolManager.recordUsage(
-        selectedKeyInfo.id,
-        'models',
-        response.status,
-        0, // models端点不涉及token使用
-        errorText
-      );
-
-      if (!response.ok) {
-        await poolManager.recordError(selectedKeyInfo.id, `HTTP ${response.status}: ${response.statusText} - ${errorText}`);
-        console.log(`🔄 API Key ${selectedKeyInfo.gmail_email} 调用失败，轮询将自动跳过此key`);
-
-        // 如果是429，临时禁用该Key并记录last_used_at
-        if (isRateLimitOrForbidden(response.status)) {
-          try {
-            await poolManager.disableKeyOnRateLimit(selectedKeyInfo.id);
-          } catch (e) {
-            console.error('禁用Key(429)失败:', e);
-          }
-        }
-      }
-    } catch (error) {
-      console.error('记录使用统计失败:', error);
-    }
-  }
 
   let { body } = response;
   if (response.ok) {
@@ -252,7 +252,7 @@ async function handleModels (apiKey, selectedKeyInfo = null, poolManager = null,
 }
 
 const DEFAULT_EMBEDDINGS_MODEL = "gemini-embedding-001";
-async function handleEmbeddings (req, apiKey, selectedKeyInfo = null, poolManager = null, apiVersion = "v1beta") {
+async function handleEmbeddings(req, apiKey, apiVersion = "v1beta") {
   let modelFull, model;
   switch (true) {
     case typeof req.model !== "string":
@@ -283,46 +283,6 @@ async function handleEmbeddings (req, apiKey, selectedKeyInfo = null, poolManage
     })
   });
 
-  // 记录使用统计
-  if (selectedKeyInfo && poolManager) {
-    try {
-      // 获取错误文本（如果有的话）
-      let errorText = null;
-      if (!response.ok) {
-        try {
-          errorText = await response.clone().text();
-        } catch (textError) {
-          console.error('获取响应文本失败:', textError);
-          errorText = '无法获取错误详情';
-        }
-      }
-
-      await poolManager.recordUsage(
-        selectedKeyInfo.id,
-        'embeddings',
-        response.status,
-        0, // embeddings的token计算比较复杂，暂时设为0
-        errorText
-      );
-
-      if (!response.ok) {
-        await poolManager.recordError(selectedKeyInfo.id, `HTTP ${response.status}: ${response.statusText} - ${errorText}`);
-        console.log(`🔄 API Key ${selectedKeyInfo.gmail_email} 调用失败，轮询将自动跳过此key`);
-
-        // 如果是429，临时禁用该Key并记录last_used_at
-        if (isRateLimitOrForbidden(response.status)) {
-          try {
-            await poolManager.disableKeyOnRateLimit(selectedKeyInfo.id);
-          } catch (e) {
-            console.error('禁用Key(429)失败:', e);
-          }
-        }
-      }
-    } catch (error) {
-      console.error('记录使用统计失败:', error);
-    }
-  }
-
   let { body } = response;
   if (response.ok) {
     const { embeddings } = JSON.parse(await response.text());
@@ -340,7 +300,7 @@ async function handleEmbeddings (req, apiKey, selectedKeyInfo = null, poolManage
 }
 
 const DEFAULT_MODEL = "gemini-2.5-flash";
-async function handleCompletions (req, apiKey, selectedKeyInfo = null, poolManager = null, apiVersion = "v1beta") {
+async function handleCompletions(req, apiKey, apiVersion = "v1beta") {
   let model;
   switch (true) {
     case typeof req.model !== "string":
@@ -384,51 +344,9 @@ async function handleCompletions (req, apiKey, selectedKeyInfo = null, poolManag
     body: JSON.stringify(body),
   });
 
-  // 记录使用统计
-  let tokensUsed = 0;
-  if (selectedKeyInfo && poolManager) {
-    try {
-      // 获取错误文本（如果有的话）
-      let errorText = null;
-      if (!response.ok) {
-        try {
-          errorText = await response.clone().text();
-        } catch (textError) {
-          console.error('获取响应文本失败:', textError);
-          errorText = '无法获取错误详情';
-        }
-      }
-
-      // 对于流式响应，我们无法立即获取token统计，所以先记录请求
-      await poolManager.recordUsage(
-        selectedKeyInfo.id,
-        'chat/completions',
-        response.status,
-        tokensUsed, // 流式响应的token会在后续更新
-        errorText
-      );
-
-      if (!response.ok) {
-        await poolManager.recordError(selectedKeyInfo.id, `HTTP ${response.status}: ${response.statusText} - ${errorText}`);
-        console.log(`🔄 API Key ${selectedKeyInfo.gmail_email} 调用失败，轮询将自动跳过此key`);
-
-        // 如果是429，临时禁用该Key并记录last_used_at
-        if (isRateLimitOrForbidden(response.status)) {
-          try {
-            await poolManager.disableKeyOnRateLimit(selectedKeyInfo.id);
-          } catch (e) {
-            console.error('禁用Key(429)失败:', e);
-          }
-        }
-      }
-    } catch (error) {
-      console.error('记录使用统计失败:', error);
-    }
-  }
-
   body = response.body;
   if (response.ok) {
-    let id = "chatcmpl-" + generateId(); //"chatcmpl-8pMMaqXMK68B3nyDBrapTDrhkHBQK";
+    let id = "chatcmpl-" + generateId();
     const shared = {};
     if (req.stream) {
       body = response.body
@@ -444,7 +362,6 @@ async function handleCompletions (req, apiKey, selectedKeyInfo = null, poolManag
           flush: toOpenAiStreamFlush,
           streamIncludeUsage: req.stream_options?.include_usage,
           model, id, last: [],
-          selectedKeyInfo,
           shared,
         }))
         .pipeThrough(new TextEncoderStream());
@@ -459,7 +376,7 @@ async function handleCompletions (req, apiKey, selectedKeyInfo = null, poolManag
         console.error("Error parsing response:", err);
         return new Response(body, fixCors(response)); // output as is
       }
-      body = processCompletionsResponse(body, model, id, selectedKeyInfo);
+      body = processCompletionsResponse(body, model, id);
     }
   }
   return new Response(body, fixCors(response));
@@ -482,7 +399,7 @@ const adjustSchema = (schema) => {
   const obj = schema[schema.type];
   delete obj.strict;
   delete obj.parameters?.$schema;
-  return adjustProps(schema);
+  adjustProps(schema);
 };
 
 const harmCategory = [
@@ -517,7 +434,6 @@ const thinkingBudgetMap = {
 };
 const transformConfig = (req) => {
   let cfg = {};
-  //if (typeof req.stop === "string") { req.stop = [req.stop]; } // no need
   for (let key in req) {
     const matchedKey = fieldsMap[key];
     if (matchedKey) {
@@ -640,15 +556,9 @@ const transformFnCalls = ({ tool_calls }) => {
 const transformMsg = async ({ content }) => {
   const parts = [];
   if (!Array.isArray(content)) {
-    // system, user: string
-    // assistant: string or null (Required unless tool_calls is specified.)
     parts.push({ text: content });
     return parts;
   }
-  // user:
-  // An array of content parts with a defined type.
-  // Supported options differ based on the model being used to generate the response.
-  // Can contain text, image, or audio inputs.
   for (const item of content) {
     switch (item.type) {
       case "text":
@@ -715,7 +625,6 @@ const transformMessages = async (messages) => {
       contents.unshift({ role: "user", parts: { text: " " } });
     }
   }
-  //console.info(JSON.stringify(contents, 2));
   return { system_instruction, contents };
 };
 
@@ -786,7 +695,6 @@ const transformCandidates = (key, cand) => {
     [key]: message,
     logprobs: null,
     finish_reason: message.tool_calls ? "tool_calls" : reasonsMap[cand.finishReason] || cand.finishReason,
-    //original_finish_reason: cand.finishReason,
   };
 };
 const transformCandidatesMessage = transformCandidates.bind(null, "message");
@@ -826,36 +734,28 @@ const checkPromptBlock = (choices, promptFeedback, key) => {
       index: 0,
       [key]: null,
       finish_reason: "content_filter",
-      //original_finish_reason: data.promptFeedback.blockReason,
     });
   }
   return true;
 };
 
-const processCompletionsResponse = (data, model, id, selectedKeyInfo = null) => {
+const processCompletionsResponse = (data, model, id) => {
   const obj = {
     id,
     choices: data.candidates.map(transformCandidatesMessage),
     created: Math.floor(Date.now()/1000),
     model: data.modelVersion ?? model,
-    //system_fingerprint: "fp_69829325d0",
     object: "chat.completion",
     usage: data.usageMetadata && transformUsage(data.usageMetadata),
   };
-
-  // 当使用连接池的key时，添加api_user字段
-  if (selectedKeyInfo && selectedKeyInfo.gmail_email) {
-    obj.api_user = selectedKeyInfo.gmail_email;
-  }
-
-  if (obj.choices.length === 0 ) {
+  if (obj.choices.length === 0) {
     checkPromptBlock(obj.choices, data.promptFeedback, "message");
   }
   return JSON.stringify(obj);
 };
 
 const responseLineRE = /^data: (.*)(?:\n\n|\r\r|\r\n\r\n)/;
-function parseStream (chunk, controller) {
+function parseStream(chunk, controller) {
   this.buffer += chunk;
   do {
     const match = this.buffer.match(responseLineRE);
@@ -864,7 +764,7 @@ function parseStream (chunk, controller) {
     this.buffer = this.buffer.substring(match[0].length);
   } while (true); // eslint-disable-line no-constant-condition
 }
-function parseStreamFlush (controller) {
+function parseStreamFlush(controller) {
   if (this.buffer) {
     console.error("Invalid data:", this.buffer);
     controller.enqueue(this.buffer);
@@ -877,7 +777,7 @@ const sseline = (obj) => {
   obj.created = Math.floor(Date.now()/1000);
   return "data: " + JSON.stringify(obj) + delimiter;
 };
-function toOpenAiStream (line, controller) {
+function toOpenAiStream(line, controller) {
   let data;
   try {
     data = JSON.parse(line);
@@ -886,24 +786,17 @@ function toOpenAiStream (line, controller) {
     }
   } catch (err) {
     console.error("Error parsing response:", err);
-    if (!this.shared.is_buffers_rest) { line =+ delimiter; }
+    if (!this.shared.is_buffers_rest) { line += delimiter; } // fixed: was =+
     controller.enqueue(line); // output as is
     return;
   }
   const obj = {
     id: this.id,
     choices: data.candidates.map(transformCandidatesDelta),
-    //created: Math.floor(Date.now()/1000),
     model: data.modelVersion ?? this.model,
-    //system_fingerprint: "fp_69829325d0",
     object: "chat.completion.chunk",
     usage: data.usageMetadata && this.streamIncludeUsage ? null : undefined,
   };
-
-  // 当使用连接池的key时，添加api_user字段
-  if (this.selectedKeyInfo && this.selectedKeyInfo.gmail_email) {
-    obj.api_user = this.selectedKeyInfo.gmail_email;
-  }
   if (checkPromptBlock(obj.choices, data.promptFeedback, "delta")) {
     controller.enqueue(sseline(obj));
     return;
@@ -914,15 +807,10 @@ function toOpenAiStream (line, controller) {
   const finish_reason = cand.finish_reason;
   cand.finish_reason = null;
   if (!this.last[cand.index]) { // first
-    const firstChunk = {
+    controller.enqueue(sseline({
       ...obj,
       choices: [{ ...cand, tool_calls: undefined, delta: { role: "assistant", content: "" } }],
-    };
-    // 确保第一个chunk也包含api_user字段
-    if (this.selectedKeyInfo && this.selectedKeyInfo.gmail_email) {
-      firstChunk.api_user = this.selectedKeyInfo.gmail_email;
-    }
-    controller.enqueue(sseline(firstChunk));
+    }));
   }
   delete cand.delta.role;
   if ("content" in cand.delta) { // prevent empty data (e.g. when MAX_TOKENS)
@@ -935,7 +823,7 @@ function toOpenAiStream (line, controller) {
   cand.delta = {};
   this.last[cand.index] = obj;
 }
-function toOpenAiStreamFlush (controller) {
+function toOpenAiStreamFlush(controller) {
   if (this.last.length > 0) {
     for (const obj of this.last) {
       controller.enqueue(sseline(obj));
@@ -943,5 +831,3 @@ function toOpenAiStreamFlush (controller) {
     controller.enqueue("data: [DONE]" + delimiter);
   }
 }
-
-
