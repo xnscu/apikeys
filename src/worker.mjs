@@ -1,5 +1,6 @@
 import { Buffer } from "node:buffer";
 import { ApiKeyPoolManager } from "./db-manager.mjs";
+import { renderDashboard } from "./dashboard.mjs";
 
 export default {
   async fetch(request, env, ctx) {
@@ -16,6 +17,22 @@ export default {
 
     try {
       const { pathname } = new URL(request.url);
+
+      // Dashboard 页面
+      if (pathname === '/dashboard') {
+        if (!env?.DB) {
+          return new Response('Dashboard requires D1 database', { status: 503 });
+        }
+        try {
+          const data = await poolManager.getDashboardData();
+          return new Response(renderDashboard(data), {
+            headers: { 'Content-Type': 'text/html; charset=utf-8' },
+          });
+        } catch (err) {
+          console.error('Dashboard error:', err);
+          return new Response('Dashboard error: ' + err.message, { status: 500 });
+        }
+      }
 
       // 从 URL 中提取 API 版本和端点
       const pathMatch = pathname.match(/^\/([^/]+)\/(.+)$/);

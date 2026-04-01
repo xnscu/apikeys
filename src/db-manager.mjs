@@ -147,6 +147,88 @@ export class ApiKeyPoolManager {
   }
 
   /**
+   * 获取 Dashboard 所需的全部数据
+   */
+  async getDashboardData() {
+    const [overview, activeKeys, keyStats, errorDistribution, endpointStats, errorDetails] = await Promise.all([
+      // 24h 概览
+      this.db.prepare(`
+        SELECT
+          COUNT(*) as total_requests,
+          SUM(CASE WHEN response_status = 200 THEN 1 ELSE 0 END) as success_count,
+          SUM(CASE WHEN response_status <> 200 THEN 1 ELSE 0 END) as error_count
+        FROM api_key_usage
+        WHERE request_timestamp >= datetime('now', '-24 hours')
+      `).first(),
+
+      // Key 总数 / 活跃数
+      this.db.prepare(`
+        SELECT
+          COUNT(*) as total,
+          SUM(CASE WHEN is_active = 1 THEN 1 ELSE 0 END) as active
+        FROM api_keys
+      `).first(),
+
+      // 每个 Key 的状态
+      this.db.prepare(`
+        SELECT
+          b.gmail_email,
+          b.is_active,
+          b.total_requests,
+          b.error_count,
+          b.last_used_at,
+          COUNT(CASE WHEN a.request_timestamp >= datetime('now', '-24 hours') THEN 1 END) as requests_24h,
+          COUNT(CASE WHEN a.request_timestamp >= datetime('now', '-24 hours') AND a.response_status = 200 THEN 1 END) as success_24h,
+          COUNT(CASE WHEN a.request_timestamp >= datetime('now', '-24 hours') AND a.response_status <> 200 THEN 1 END) as errors_24h
+        FROM api_keys b
+        LEFT JOIN api_key_usage a ON b.id = a.api_key_id
+        GROUP BY b.id
+        ORDER BY b.gmail_email
+      `).all(),
+
+      // 24h 错误状态码分布
+      this.db.prepare(`
+        SELECT response_status, COUNT(*) as count
+        FROM api_key_usage
+        WHERE response_status <> 200
+          AND request_timestamp >= datetime('now', '-24 hours')
+        GROUP BY response_status
+        ORDER BY count DESC
+      `).all(),
+
+      // 24h 端点统计
+      this.db.prepare(`
+        SELECT
+          endpoint,
+          COUNT(*) as total,
+          SUM(CASE WHEN response_status = 200 THEN 1 ELSE 0 END) as success,
+          SUM(CASE WHEN response_status <> 200 THEN 1 ELSE 0 END) as errors
+        FROM api_key_usage
+        WHERE request_timestamp >= datetime('now', '-24 hours')
+        GROUP BY endpoint
+      `).all(),
+
+      // 错误明细（最近 200 条非 200 请求）
+      this.db.prepare(`
+        SELECT b.gmail_email, a.response_status, a.error_message, a.request_timestamp
+        FROM api_key_usage a
+        JOIN api_keys b ON a.api_key_id = b.id
+        WHERE a.response_status <> 200
+        ORDER BY a.id DESC
+        LIMIT 200
+      `).all(),
+    ]);
+
+    return {
+      overview: { ...overview, ...activeKeys },
+      keyStats: keyStats.results || [],
+      errorDistribution: errorDistribution.results || [],
+      endpointStats: endpointStats.results || [],
+      errorDetails: errorDetails.results || [],
+    };
+  }
+
+  /**
    * 清理过期的使用记录，防止 api_key_usage 表无限增长
    */
   async cleanupOldUsageRecords(retentionDays = 30) {
