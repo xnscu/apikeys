@@ -1,65 +1,92 @@
 const esc = (s) => {
-  if (s == null) return '';
-  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  if (s == null) return "";
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 };
 
 export function renderDashboard(data) {
-  const { overview, keyStats, errorDistribution, endpointStats, errorDetails } = data;
+  const { overview, keyStats, errorDistribution, endpointStats, errorDetails } =
+    data;
 
   const totalReqs = overview.total_requests || 0;
   const successCount = overview.success_count || 0;
   const errorCount = overview.error_count || 0;
-  const successRate = totalReqs > 0 ? ((successCount / totalReqs) * 100).toFixed(1) : '-';
+  const successRate =
+    totalReqs > 0 ? ((successCount / totalReqs) * 100).toFixed(1) : "-";
   const activeKeys = overview.active || 0;
   const totalKeys = overview.total || 0;
 
-  const rateClass = successRate === '-' ? '' : (+successRate >= 90 ? 'good' : +successRate >= 70 ? 'warn' : 'bad');
+  const rateClass =
+    successRate === "-"
+      ? ""
+      : +successRate >= 90
+        ? "good"
+        : +successRate >= 70
+          ? "warn"
+          : "bad";
 
-  const keyRows = keyStats.map(k => `
+  const keyRows = keyStats
+    .map(
+      (k) => `
     <tr>
       <td>${esc(k.gmail_email)}</td>
-      <td><span class="badge ${k.is_active ? 'badge-ok' : 'badge-off'}">${k.is_active ? 'Active' : 'Disabled'}</span></td>
+      <td><span class="badge ${k.is_active ? "badge-ok" : "badge-off"}">${k.is_active ? "Active" : "Disabled"}</span></td>
       <td class="num">${k.total_requests}</td>
-      <td class="num ${k.error_count > 0 ? 'txt-err' : ''}">${k.error_count}</td>
+      <td class="num ${k.error_count > 0 ? "txt-err" : ""}">${k.error_count}</td>
       <td class="num">${k.requests_24h}</td>
       <td class="num">${k.success_24h}</td>
-      <td class="num ${k.errors_24h > 0 ? 'txt-err' : ''}">${k.errors_24h}</td>
-      <td class="ts">${esc(k.last_used_at) || '-'}</td>
-    </tr>`).join('');
+      <td class="num ${k.errors_24h > 0 ? "txt-err" : ""}">${k.errors_24h}</td>
+      <td class="ts">${esc(k.last_used_at) || "-"}</td>
+    </tr>`,
+    )
+    .join("");
 
-  const epRows = endpointStats.map(e => {
-    const rate = e.total > 0 ? ((e.success / e.total) * 100).toFixed(1) + '%' : '-';
-    return `
+  const epRows = endpointStats
+    .map((e) => {
+      const rate =
+        e.total > 0 ? ((e.success / e.total) * 100).toFixed(1) + "%" : "-";
+      return `
     <tr>
       <td>${esc(e.endpoint)}</td>
       <td class="num">${e.total}</td>
       <td class="num">${e.success}</td>
-      <td class="num ${e.errors > 0 ? 'txt-err' : ''}">${e.errors}</td>
+      <td class="num ${e.errors > 0 ? "txt-err" : ""}">${e.errors}</td>
       <td class="num">${rate}</td>
     </tr>`;
-  }).join('');
+    })
+    .join("");
 
-  const edRows = errorDistribution.map(e => `
+  const edRows = errorDistribution
+    .map(
+      (e) => `
     <tr>
       <td class="num">${e.response_status}</td>
       <td class="num">${e.count}</td>
-    </tr>`).join('');
+    </tr>`,
+    )
+    .join("");
 
-  const detailRows = errorDetails.map(d => {
-    const msg = d.error_message || '';
-    const short = msg.length > 300 ? msg.substring(0, 300) + '...' : msg;
-    const needExpand = msg.length > 300;
-    return `
+  const detailRows = errorDetails
+    .map((d) => {
+      const msg = d.error_message || "";
+      const short = msg.length > 300 ? msg.substring(0, 300) + "..." : msg;
+      const needExpand = msg.length > 300;
+      return `
     <tr>
       <td>${esc(d.gmail_email)}</td>
       <td class="num">${d.response_status}</td>
-      <td class="err-cell">${needExpand
-        ? `<details><summary>${esc(short)}</summary><pre class="err-full">${esc(msg)}</pre></details>`
-        : `<span>${esc(short)}</span>`
+      <td class="err-cell">${
+        needExpand
+          ? `<details><summary>${esc(short)}</summary><pre class="err-full">${esc(msg)}</pre></details>`
+          : `<span>${esc(short)}</span>`
       }</td>
       <td class="ts">${esc(d.request_timestamp)}</td>
     </tr>`;
-  }).join('');
+    })
+    .join("");
 
   return `<!DOCTYPE html>
 <html lang="zh-CN">
@@ -90,9 +117,9 @@ section h2{font-size:15px;font-weight:600;padding:14px 20px;border-bottom:1px so
 .tbl-wrap{overflow-x:auto}
 table{width:100%;border-collapse:collapse;font-size:13px}
 th{background:#f8f9fa;text-align:left;padding:8px 12px;font-weight:600;color:#5f6368;border-bottom:1px solid #e8eaed;white-space:nowrap}
-td{padding:8px 12px;border-bottom:1px solid #f1f3f4}
+td{padding:8px 12px;border-bottom:1px solid #f1f3f4;text-align:center}
 tr:hover td{background:#f8f9fa}
-.num{text-align:right;font-variant-numeric:tabular-nums}
+.num{text-align:center;font-variant-numeric:tabular-nums}
 .ts{white-space:nowrap;color:#5f6368;font-size:12px}
 .txt-err{color:#ea4335;font-weight:600}
 .badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600}
@@ -124,7 +151,7 @@ tr:hover td{background:#f8f9fa}
     </div>
     <div class="card">
       <div class="label">Success Rate (24h)</div>
-      <div class="value ${rateClass}">${successRate === '-' ? '-' : successRate + '%'}</div>
+      <div class="value ${rateClass}">${successRate === "-" ? "-" : successRate + "%"}</div>
     </div>
     <div class="card">
       <div class="label">Active Keys</div>
@@ -132,7 +159,7 @@ tr:hover td{background:#f8f9fa}
     </div>
     <div class="card">
       <div class="label">Errors (24h)</div>
-      <div class="value ${errorCount > 0 ? 'bad' : ''}">${errorCount}</div>
+      <div class="value ${errorCount > 0 ? "bad" : ""}">${errorCount}</div>
     </div>
   </div>
 
