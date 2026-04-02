@@ -116,7 +116,7 @@ section{background:#fff;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,.08);m
 section h2{font-size:15px;font-weight:600;padding:14px 20px;border-bottom:1px solid #e8eaed;background:#fafbfc}
 .tbl-wrap{overflow-x:auto}
 table{width:100%;border-collapse:collapse;font-size:13px}
-th{background:#f8f9fa;text-align:left;padding:8px 12px;font-weight:600;color:#5f6368;border-bottom:1px solid #e8eaed;white-space:nowrap}
+th{background:#f8f9fa;text-align:center;padding:8px 12px;font-weight:600;color:#5f6368;border-bottom:1px solid #e8eaed;white-space:nowrap}
 td{padding:8px 12px;border-bottom:1px solid #f1f3f4;text-align:center}
 tr:hover td{background:#f8f9fa}
 .num{text-align:center;font-variant-numeric:tabular-nums}
