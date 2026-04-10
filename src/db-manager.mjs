@@ -61,9 +61,8 @@ export class ApiKeyPoolManager {
    * - 从 7~12 次 DB 查询降到 3 次
    */
   async getNextApiKey() {
-    const configs = await this.getConfigs(['cooldown_hours', 'max_errors_threshold']);
+    const configs = await this.getConfigs(['cooldown_hours']);
     const cooldownHours = parseInt(configs.cooldown_hours || '24');
-    const maxErrorsThreshold = parseInt(configs.max_errors_threshold || '5');
 
     const selectedKey = await this.db.prepare(`
       SELECT * FROM api_keys
@@ -75,10 +74,9 @@ export class ApiKeyPoolManager {
           AND datetime(last_used_at, '+' || ? || ' hours') <= datetime('now')
         )
       )
-      AND error_count < ?
       ORDER BY last_used_at ASC
       LIMIT 1
-    `).bind(cooldownHours, maxErrorsThreshold).first();
+    `).bind(cooldownHours).first();
 
     if (!selectedKey) {
       throw new Error('没有可用的API Keys');
@@ -102,7 +100,7 @@ export class ApiKeyPoolManager {
    */
   async recordUsage(apiKeyId, endpoint, responseStatus, tokensUsed = 0, errorMessage = null) {
     const config = await this.getConfigs(['enable_usage_tracking']);
-    if (config.enable_usage_tracking !== '1') return;
+    if (config.enable_usage_tracking === '0') return;
 
     await this.db.prepare(`
       INSERT INTO api_key_usage (api_key_id, endpoint, response_status, tokens_used, error_message)
